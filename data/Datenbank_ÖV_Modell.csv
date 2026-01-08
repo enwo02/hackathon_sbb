@@ -1,0 +1,18 @@
+AnlageID,Typ,Zustand,Location,Sanierungskosten,Dauer Sanierung (12 stnd)
+Weggis_Kai,Kai,2,10000,2
+Luzern_kai,Kai,1,5000,2
+Luzern_Weiche_1,Weiche,2,150000,1
+Luzern_Weiche_2,Weiche,1,70000,1
+Küsnacht_Weiche_1,Weiche,3,200000,2
+Brücke_Luzern_Kü,Brücke,2,350000,6
+Weggis_KS,K_Straße,2,50000,1
+Kü_KS,K_Straße,1,30000,1
+AG_Kü_Weiche_1,Weiche,3,60000,2
+AG_Kü_Weiche_2,Weiche,4,100000,3
+AG_Kü_Weiche_3,Weiche,5,180000,4
+Brücke_Luzern_Kü,Brücke,4,1000000,12
+AG_Ri_Tunnel1,Tunnel,1,400000,4
+AG_Ri_Tunnel2,Tunnel,3,840000,8
+AG_Ri_Weiche1,Weiche,2,60000,4
+Ri_Wegg_Seilen,Seilen,2,1500000,8
+Ri_Wegg_Kabine,Kabine,2,50000,1
