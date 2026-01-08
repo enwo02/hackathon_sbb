@@ -1,0 +1,31 @@
+{
+  "best_schedule": {
+    "Weggis_Kai": 10.79498663641922,
+    "Luzern_kai": 61.291806066974154,
+    "Luzern_Weiche_1": 62.19040247563628,
+    "Luzern_Weiche_2": 35.197181169609934,
+    "K\u00fcsnacht_Weiche_1": 44.852274104251045,
+    "Br\u00fccke_Luzern_K\u00fc": 156.0,
+    "Weggis_KS": 108.86994472142771,
+    "K\u00fc_KS": 102.33400895205402,
+    "AG_K\u00fc_Weiche_1": 28.751292897280294,
+    "AG_K\u00fc_Weiche_2": 122.49330205565866,
+    "AG_K\u00fc_Weiche_3": 27.45161895200397,
+    "AG_Ri_Tunnel1": 63.74851421528483,
+    "AG_Ri_Tunnel2": 160.0,
+    "AG_Ri_Weiche1": 107.5199596554876,
+    "Ri_Wegg_Seilen": 93.56755695414057,
+    "Ri_Wegg_Kabine": 115.01519416629894
+  },
+  "objectives": {
+    "served_adjusted": 13248.0,
+    "avg_condition": 0.9638826242562102,
+    "avg_travel_time": 0.17673238590436482,
+    "total_cost": 34480000.0
+  },
+  "notes": [
+    "Objectives are true multi-objective (NSGA-II): maximize served, condition; minimize travel time, cost.",
+    "Edge capacity modeled via simpy.Resource; maintenance reduces capacity & increases travel time.",
+    "Asset condition degrades with time and usage (usage_degradation_per_passage)."
+  ]
+}

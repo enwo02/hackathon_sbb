@@ -9,27 +9,43 @@ import plotly.express as px
 from datetime import date, timedelta
 import math
 from pathlib import Path
+import json
 
 st.set_page_config(page_title="Schedule Visualizer", layout="wide")
 
 st.title("Bio-Construction-Schedular")
 
-# Hardcoded "best result" (mocked, matches the structure you showed)
-best_result = {
+# Load best_result from output/summary.json (fallback to a small hardcoded example)
+project_root = Path(__file__).resolve().parents[1]
+summary_json_path = project_root / "output" / "summary.json"
+
+fallback_best_result = {
     "best_schedule": {
         "A1": 3.1712530261677268,
         "A2": 1.508604770429887,
         "A3": 0.0,
         "A4": 60.61600586577646,
     },
-    "weighted_objectives": {
+    # New schema: objectives
+    "objectives": {
         "condition_penalty": 0.024060787510129356,
         "travel_penalty": 0.09585103276242014,
         "cost_penalty": 1134000.0,
     },
 }
 
-best_result = {  "best_schedule": {    "Weggis_Kai": 89.58657060832036,    "Luzern_kai": 63.49969712347016,    "Luzern_Weiche_1": 126.33765035720386,    "Luzern_Weiche_2": 140.3128973471476,    "K\u00fcsnacht_Weiche_1": 134.05876541845157,    "Br\u00fccke_Luzern_K\u00fc": 119.3017887574167,    "Weggis_KS": 4.776391200102516,    "K\u00fc_KS": 26.05402015498437,    "AG_K\u00fc_Weiche_1": 107.68971042078351,    "AG_K\u00fc_Weiche_2": 146.86949220965687,    "AG_K\u00fc_Weiche_3": 162.03773622141608,    "AG_Ri_Tunnel1": 131.24715233463036,    "AG_Ri_Tunnel2": 122.8361689086846,    "AG_Ri_Weiche1": 126.73229739306042,    "Ri_Wegg_Seilen": 146.56842607168375,    "Ri_Wegg_Kabine": 90.61752346432978  },  "objectives": {    "served_adjusted": 10424.0,    "avg_condition": 0.9676958972132257,    "avg_travel_time": 0.1627745444338592,    "total_cost": 34480000.0  },  "notes": [    "Objectives are true multi-objective (NSGA-II): maximize served, condition; minimize travel time, cost.",    "Edge capacity modeled via simpy.Resource; maintenance reduces capacity & increases travel time.",    "Asset condition degrades with time and usage (usage_degradation_per_passage)."  ]}
+try:
+    with open(summary_json_path, "r", encoding="utf-8") as f:
+        best_result = json.load(f)
+    if not isinstance(best_result, dict):
+        raise ValueError("summary.json did not contain a JSON object")
+except Exception as e:
+    st.warning(f"Could not read {summary_json_path}: {e}. Falling back to hardcoded sample data.")
+    best_result = fallback_best_result
+
+# Backwards-compatible shim (if some older file still uses weighted_objectives)
+if "objectives" not in best_result and "weighted_objectives" in best_result:
+    best_result["objectives"] = best_result.get("weighted_objectives")
 
 # Part 1: Map with nodes and edges
 col_left, col_right = st.columns([1, 1], gap="large")
@@ -227,13 +243,49 @@ start_values = best_result["best_schedule"]
 # Base date for the visualization
 base_date = date(2026, 1, 1)
 
+# Load per-asset maintenance durations (half-days) from assets_template.csv
+assets_csv_path = data_dir / "assets_template.csv"
+DEFAULT_DURATION_DAYS = 4.0
+
+duration_days_by_asset: dict[str, float] = {}
+try:
+    df_assets = pd.read_csv(assets_csv_path)
+    required_asset_cols = {"asset_id", "maintenance_duration_half_days"}
+    if not required_asset_cols.issubset(set(df_assets.columns)):
+        raise ValueError(
+            f"assets_template.csv must contain columns {sorted(required_asset_cols)}; got {sorted(df_assets.columns)}"
+        )
+
+    df_assets = df_assets.dropna(subset=["asset_id"]).copy()
+    df_assets["maintenance_duration_half_days"] = pd.to_numeric(
+        df_assets["maintenance_duration_half_days"], errors="coerce"
+    )
+    # Convert half-days -> days
+    df_assets["duration_days"] = df_assets["maintenance_duration_half_days"] / 2.0
+
+    duration_days_by_asset = {
+        str(r.asset_id): (
+            float(r.duration_days)
+            if r.duration_days is not None and not pd.isna(r.duration_days) and float(r.duration_days) > 0
+            else DEFAULT_DURATION_DAYS
+        )
+        for r in df_assets.itertuples(index=False)
+    }
+except Exception as e:
+    st.warning(
+        f"Could not read asset durations from {assets_csv_path}: {e}. Falling back to {DEFAULT_DURATION_DAYS} days."
+    )
+
 rows = []
 for asset in assets:
     raw_start = start_values[asset]
     # For the mocked calendar, interpret the start as whole-day offset (floor)
     start_day = int(math.floor(raw_start))
     start_dt = base_date + timedelta(days=start_day)
-    end_dt = start_dt + timedelta(days=4)  # fixed length of 4 days as requested
+
+    duration_days = float(duration_days_by_asset.get(asset, DEFAULT_DURATION_DAYS))
+    end_dt = start_dt + timedelta(days=float(duration_days))
+
     # Use pandas timestamps (JSON-serializable through Plotly) and keep them separate from any timedelta objects
     rows.append(
         {
@@ -241,6 +293,7 @@ for asset in assets:
             "Start": pd.Timestamp(start_dt),
             "End": pd.Timestamp(end_dt),
             "raw_start": float(raw_start),
+            "duration_days": float(duration_days),
         }
     )
 
@@ -261,19 +314,40 @@ df_schedule_plot["End"] = df_schedule_plot["End"].dt.to_pydatetime()
 # We plot in "days since base_date" and format tick labels ourselves.
 df_bar = df_schedule.copy()
 df_bar["start_day"] = (df_bar["Start"].dt.normalize() - pd.Timestamp(base_date)).dt.days
-df_bar["duration_days"] = (df_bar["End"].dt.normalize() - df_bar["Start"].dt.normalize()).dt.days
+# Use the computed duration (may be fractional) rather than re-deriving it from timestamps.
+df_bar["duration_days"] = df_bar.get("duration_days", DEFAULT_DURATION_DAYS).astype(float)
 
 fig_timeline = go.Figure()
 for _, r in df_bar.iterrows():
+    start_day = int(r["start_day"])
+    dur_days = float(r["duration_days"])
+    end_day = float(start_day + dur_days)
+    start_date = base_date + timedelta(days=start_day)
+    end_date = base_date + timedelta(days=end_day)
+
     fig_timeline.add_trace(
         go.Bar(
             y=[r["Asset"]],
-            x=[int(r["duration_days"])],
-            base=[int(r["start_day"])],
+            x=[dur_days],
+            base=[start_day],
+            customdata=[
+                [
+                    start_day,
+                    dur_days,
+                    end_day,
+                    start_date.isoformat(),
+                    end_date.isoformat(),
+                ]
+            ],
             orientation="h",
             name=r["Asset"],
             hovertemplate=(
-                "<b>%{y}</b><br>Start day: %{base}<br>Duration: %{x} days<extra></extra>"
+                "<b>%{y}</b><br>"
+                #"Start day: %{customdata[0]}<br>"
+                "Duration: %{customdata[1]:.1f} days<br>"
+                "Start: %{customdata[3]}<br>"
+                "End: %{customdata[4]}"
+                "<extra></extra>"
             ),
         )
     )
@@ -282,9 +356,10 @@ def _tick_label(day_offset: int) -> str:
     d = base_date + timedelta(days=int(day_offset))
     return d.isoformat()
 
-max_end = int((df_bar["start_day"] + df_bar["duration_days"]).max())
+max_end = float((df_bar["start_day"] + df_bar["duration_days"]).max())
 tick_step = 7
-tickvals = list(range(0, max_end + tick_step, tick_step))
+max_tick = int(math.ceil(max_end / tick_step) * tick_step)
+tickvals = list(range(0, max_tick + tick_step, tick_step))
 ticktext = [_tick_label(v) for v in tickvals]
 
 # Dynamically size the chart so all assets are visible.
@@ -316,11 +391,13 @@ with col_right:
     )
 
 # Footer with weighted objectives
-st.subheader("Weighted objectives (mocked)")
-wo = best_result["weighted_objectives"]
-st.write(f"Condition penalty: {wo['condition_penalty']}")
-st.write(f"Travel penalty: {wo['travel_penalty']}")
-st.write(f"Cost penalty: {wo['cost_penalty']}")
+st.subheader("Objectives")
+wo = best_result.get("objectives", {})
+if isinstance(wo, dict) and wo:
+    for k, v in wo.items():
+        st.write(f"{k}: {v}")
+else:
+    st.write("No objectives found in result.")
 
 # Raw result at the bottom
 st.divider()
