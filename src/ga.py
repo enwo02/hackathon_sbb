@@ -39,14 +39,12 @@ class NSGA2Optimizer:
         edges: Dict[str, Edge],
         assets: Dict[str, Asset],
         flows_day: List[PassengerFlow],
-        flows_night: List[PassengerFlow],
         config: GAConfig,
     ) -> None:
         self.nodes = nodes
         self.edges = edges
         self.assets = assets
         self.flows_day = flows_day
-        self.flows_night = flows_night
         self.config = config
         self.asset_ids = list(assets.keys())
         self.logger = logging.getLogger("ga")
@@ -125,7 +123,6 @@ class NSGA2Optimizer:
             self.edges,
             self.assets,
             self.flows_day,
-            self.flows_night,
             schedule,
             rng,
             self.config.horizon_hours,
@@ -186,6 +183,8 @@ class NSGA2Optimizer:
         self._progress_cb = progress_cb
 
         pop = self.toolbox.population(n=self.config.population_size)
+        print(pop)
+        exit(0)
 
         # Evaluate initial population
         invalid = [ind for ind in pop if not ind.fitness.valid]
@@ -205,6 +204,7 @@ class NSGA2Optimizer:
             self._progress_cb(0, best_schedule0, best_metrics0, hall)
 
         for _gen in range(1, self.config.generations + 1):
+            gen_start_time = time.perf_counter()
             offspring = tools.selTournamentDCD(pop, len(pop))
             offspring = [self.toolbox.clone(ind) for ind in offspring]
 
@@ -240,6 +240,9 @@ class NSGA2Optimizer:
             best_metrics_gen = best_gen.fitness.values
             if self._progress_cb is not None:
                 self._progress_cb(_gen, best_schedule_gen, best_metrics_gen, hall)
+            
+            gen_elapsed = time.perf_counter() - gen_start_time
+            print(f"[BENCHMARK] Generation {_gen} completed in {gen_elapsed:.2f} seconds", flush=True)
 
         # Final best (already selected in last iteration above, but recompute for clarity)
         best = self._choose_solution_from_pareto(list(hall))

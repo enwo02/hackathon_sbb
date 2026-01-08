@@ -372,17 +372,10 @@ def simulate_schedule(
     nodes: Dict[str, Node],
     edges: Dict[str, Edge],
     assets: Dict[str, Asset],
-    flows_day: List[PassengerFlow],
-    flows_night: List[PassengerFlow],
+    flows: List[PassengerFlow],
     schedule: Dict[str, float],
     rng: np.random.Generator,
     horizon_hours: float = 24.0,
 ) -> SimulationResult:
-    # Combine day and night flows into a single list for the simulator
-    flows: List[PassengerFlow] = []
-    if flows_day:
-        flows.extend(flows_day)
-    if flows_night:
-        flows.extend(flows_night)
     simulator = NetworkSimulator(nodes, edges, assets, flows, schedule, horizon_hours, rng)
     return simulator.run()
