@@ -14,10 +14,21 @@ import subprocess
 import sys
 import urllib.parse
 import urllib.request
+import hashlib
 
 # --- Optional OSRM routing (for Bus edges) ---
 # Uses the public demo server by default. For production, run your own OSRM instance.
 OSRM_BASE_URL = "https://router.project-osrm.org"
+
+
+def _hex_color_from_string(s: str) -> str:
+    """Deterministic bright-ish color for a given key."""
+    h = hashlib.md5(s.encode("utf-8")).hexdigest()
+    # Keep it a bit brighter by mixing with a baseline.
+    r = (int(h[0:2], 16) // 2) + 80
+    g = (int(h[2:4], 16) // 2) + 80
+    b = (int(h[4:6], 16) // 2) + 80
+    return f"#{r:02x}{g:02x}{b:02x}"
 
 
 @st.cache_data(show_spinner=False, ttl=60 * 60)
@@ -244,13 +255,43 @@ try:
         cap = getattr(r, "capacity_at_day", None)
         cap_val = float(cap) if cap is not None and not pd.isna(cap) else None
         mode_val = getattr(r, "mode", None) if "mode" in df_edges.columns else None
-        edges.append({"a": a, "b": b, "capacity_at_day": cap_val, "mode": (str(mode_val) if mode_val is not None and not pd.isna(mode_val) else None)})
+        edge_id_val = getattr(r, "edge_id", None) if "edge_id" in df_edges.columns else None
+        edges.append(
+            {
+                "a": a,
+                "b": b,
+                "edge_id": (str(edge_id_val) if edge_id_val is not None and not pd.isna(edge_id_val) else _edge_key(a, b)),
+                "capacity_at_day": cap_val,
+                "mode": (str(mode_val) if mode_val is not None and not pd.isna(mode_val) else None),
+            }
+        )
     print(f"[DEBUG frontend] loaded {len(edges)} edges", flush=True)
     if len(edges) == 0:
         edges = fallback_edges
 except Exception as e:
     st.warning(f"Could not read edges from {edges_csv_path}: {e}. Falling back to hardcoded edges.")
     edges = fallback_edges
+
+# Load asset->edge mapping so the schedule timeline can share colors with edges.
+assets_csv_path = data_dir / "assets_template.csv"
+asset_edge_by_asset_id: dict[str, str] = {}
+try:
+    df_assets_for_edges = pd.read_csv(assets_csv_path)
+    if {"asset_id", "edge_id"}.issubset(set(df_assets_for_edges.columns)):
+        df_assets_for_edges = df_assets_for_edges.dropna(subset=["asset_id", "edge_id"]).copy()
+        asset_edge_by_asset_id = {
+            str(r.asset_id): str(r.edge_id) for r in df_assets_for_edges.itertuples(index=False)
+        }
+except Exception:
+    asset_edge_by_asset_id = {}
+
+# Deterministic color per edge_id for consistent map + schedule colors.
+edge_color_by_edge_id: dict[str, str] = {}
+if len(edges) > 0 and isinstance(edges[0], dict):
+    for e in edges:
+        eid = str(e.get("edge_id") or _edge_key(e.get("a", ""), e.get("b", "")))
+        if eid not in edge_color_by_edge_id:
+            edge_color_by_edge_id[eid] = _hex_color_from_string(eid)
 
 # Optional: load train (Zug) polylines from data/edge_paths_train.csv
 edge_paths_csv_path = data_dir / "edge_paths_train.csv"
@@ -380,14 +421,17 @@ if len(edges) > 0 and isinstance(edges[0], dict):
             lat = [lat_a, lat_b]
 
         w = _edge_width_from_capacity(e.get("capacity_at_day"))
+        edge_id = str(e.get("edge_id") or _edge_key(a, b))
+        edge_color = edge_color_by_edge_id.get(edge_id) or _hex_color_from_string(edge_id)
         edge_traces.append(
             go.Scattermapbox(
                 lon=lon,
                 lat=lat,
                 mode="lines",
-                line=dict(width=w, color="blue" if mode == "Zug" else ("#2ca02c" if mode == "Bus" else "#888")),
+                line=dict(width=w, color=edge_color),
                 hovertemplate=(
-                    f"<b>{a} → {b}</b><br>"
+                    f"<b>{a}  {b}</b><br>"
+                    f"edge_id: {edge_id}<br>"
                     f"mode: {mode}<br>"
                     f"capacity_at_day: {e.get('capacity_at_day')}<br>"
                     f"path_points: {len(pts) if pts else 0}<extra></extra>"
@@ -427,7 +471,8 @@ else:
 
 fig_map.update_layout(
     mapbox=dict(
-        style="open-street-map",
+        # Black/white basemap
+        style="carto-positron",
         center=dict(lat=float(center_lat), lon=float(center_lon)),
         zoom=10,
     ),
@@ -451,7 +496,7 @@ start_values = best_result["best_schedule"]
 base_date = date(2026, 1, 1)
 
 # Load per-asset maintenance durations (half-days) from assets_template.csv
-assets_csv_path = data_dir / "assets_template.csv"
+# (assets_csv_path already defined above)
 DEFAULT_DURATION_DAYS = 4.0
 
 duration_days_by_asset: dict[str, float] = {}
@@ -526,6 +571,13 @@ df_bar["duration_days"] = df_bar.get("duration_days", DEFAULT_DURATION_DAYS).ast
 
 fig_timeline = go.Figure()
 for _, r in df_bar.iterrows():
+    asset_id = str(r["Asset"])
+    edge_id_for_asset = asset_edge_by_asset_id.get(asset_id)
+    bar_color = (
+        edge_color_by_edge_id.get(edge_id_for_asset)
+        if edge_id_for_asset is not None
+        else _hex_color_from_string(asset_id)
+    )
     start_day = int(r["start_day"])
     dur_days = float(r["duration_days"])
     end_day = float(start_day + dur_days)
@@ -537,6 +589,7 @@ for _, r in df_bar.iterrows():
             y=[r["Asset"]],
             x=[dur_days],
             base=[start_day],
+            marker=dict(color=bar_color),
             customdata=[
                 [
                     start_day,
@@ -544,13 +597,14 @@ for _, r in df_bar.iterrows():
                     end_day,
                     start_date.isoformat(),
                     end_date.isoformat(),
+                    edge_id_for_asset,
                 ]
             ],
             orientation="h",
             name=r["Asset"],
             hovertemplate=(
                 "<b>%{y}</b><br>"
-                #"Start day: %{customdata[0]}<br>"
+                "Edge: %{customdata[5]}<br>"
                 "Duration: %{customdata[1]:.1f} days<br>"
                 "Start: %{customdata[3]}<br>"
                 "End: %{customdata[4]}"
