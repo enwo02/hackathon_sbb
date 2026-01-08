@@ -100,6 +100,15 @@ def main() -> None:
             json.dump(summary, f, indent=2)
 
     optimizer = NSGA2Optimizer(nodes, edges, assets, flows_day, flows_night, config)
+    # Initialize progress file so frontends know a run has started (generation 0)
+    try:
+        progress_path = Path(args.output).parent / "progress.json"
+        progress_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(progress_path, "w", encoding="utf-8") as pf:
+            json.dump({"current_generation": 0, "total_generations": int(args.generations)}, pf)
+        print(f"[DEBUG] wrote initial progress to {progress_path}", flush=True)
+    except Exception as e:
+        print(f"[DEBUG] failed to write initial progress.json: {e}", flush=True)
     best_schedule, best_metrics, pareto = optimizer.run(progress_cb=_write_summary)
 
     save_schedule(args.output, best_schedule)

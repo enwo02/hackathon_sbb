@@ -12,7 +12,8 @@ from pathlib import Path
 import json
 import subprocess
 import sys
-import streamlit.components.v1 as components
+# removed components-based auto-refresh (manual refresh added below)
+import time
 
 st.set_page_config(page_title="Schedule Visualizer", layout="wide")
 
@@ -50,18 +51,16 @@ with st.sidebar:
         weights = (w1 / _total_w, w2 / _total_w, w3 / _total_w)
     st.write(f"Normalized weights: {weights[0]:.2f}, {weights[1]:.2f}, {weights[2]:.2f}")
 
-    horizon = st.slider("Horizon (hours)", 1.0, 1000.0, 168.0, 1.0)
-    population = st.slider("Population", 4, 1000, 40, 1)
+    horizon = st.slider("Horizon (hours)", 1.0, 200.0, 60.0, 1.0)
+    population = st.slider("Population", 4, 200, 24, 4)
     cx = st.slider("Crossover (cx)", 0.0, 1.0, 0.3, 0.01)
     mut = st.slider("Mutation (mut)", 0.0, 1.0, 0.1, 0.01)
     run_now = st.button("Run NSGA-II")
     status_area = st.empty()
 
     # Optionally show generations/seed inputs if needed
-    generations = st.number_input("Generations", min_value=1, max_value=10000, value=30, step=1)
-    seed = st.number_input("Random seed", min_value=0, max_value=2**31 - 1, value=42, step=1)
-    # Auto-refresh is forced on (no UI controls to disable). Interval fixed at 0.5s.
-    pass
+    generations = st.number_input("Generations", min_value=1, max_value=10000, value=10, step=1)
+    
 
 try:
     with open(summary_json_path, "r", encoding="utf-8") as f:
@@ -82,12 +81,39 @@ else:
     except Exception:
         st.sidebar.write("Loaded summary.json")
 
-# Force auto-refresh every 0.5 seconds (no disable option)
-try:
-    ms = int(0.5 * 1000)
-    components.html(f"<script>setTimeout(()=>location.reload(), {ms});</script>", height=0)
-except Exception as e:
-    print(f"[DEBUG frontend] failed to inject forced auto-refresh script: {e}", flush=True)
+# Show generation progress if available from output/progress.json
+progress_path = project_root / "output" / "progress.json"
+# Initialize session state for progress tracking so we can persist a last-known value
+if "ga_progress" not in st.session_state:
+    st.session_state.ga_progress = {"cur": 0, "tot": int(generations) if 'generations' in locals() else 1}
+
+# Robustly attempt to read progress.json (retry on transient read/write races)
+prog = None
+for _attempt in range(5):
+    try:
+        with open(progress_path, "r", encoding="utf-8") as pf:
+            prog = json.load(pf)
+        break
+    except (json.JSONDecodeError, OSError):
+        time.sleep(0.05)
+    except Exception:
+        prog = None
+        break
+
+if prog:
+    try:
+        cur = int(prog.get("current_generation", 0))
+        tot = int(prog.get("total_generations", int(generations) if 'generations' in locals() else 1))
+        st.session_state.ga_progress = {"cur": cur, "tot": tot}
+    except Exception:
+        pass
+
+# Display the last-known progress (updates even if reading failed briefly)
+cur = st.session_state.ga_progress.get("cur", 0)
+tot = st.session_state.ga_progress.get("tot", int(generations) if 'generations' in locals() else 1)
+pct = int((cur / tot) * 100) if tot > 0 else 0
+st.sidebar.write(f"Generation: {cur}/{tot}")
+st.sidebar.progress(pct)
 
 # Backwards-compatible shim (if some older file still uses weighted_objectives)
 if "objectives" not in best_result and "weighted_objectives" in best_result:
@@ -481,8 +507,7 @@ if 'run_now' in globals() and run_now:
            "--population", str(int(population)),
            "--cx", str(float(cx)),
            "--mut", str(float(mut)),
-           "--generations", str(int(generations)),
-           "--seed", str(int(seed))]
+           "--generations", str(int(generations))]
 
     # Show command for debugging
     st.sidebar.write("Running command:")
