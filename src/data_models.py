@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Optional
 import pandas as pd
 
 
@@ -29,11 +29,12 @@ class Asset:
     edge_id: str
     asset_type: str
     condition_initial: float
-    condition_transition_rate: float
+    condition_transition_rate: float          # time-based degradation per day
     maintenance_cost_per_unit: float
     maintenance_duration_half_days: float
     location_x: float
     location_y: float
+    usage_degradation_per_passage: float = 0.0  # NEW: degradation per traversal (tunable)
 
 
 @dataclass
@@ -41,22 +42,20 @@ class PassengerFlow:
     flow_id: str
     origin: str
     destination: str
-    passengers: int
+    start_time_hour: int
+    end_time_hour: int
+    rate_per_hour: float
 
 
 @dataclass
 class SimulationResult:
     avg_condition: float
     avg_travel_time: float
-    passenger_count: int
+    served_trips: int
+    generated_trips: int
+    failed_trips: int
     total_cost: float
     schedule: Dict[str, float]
-
-
-def parse_asset_path(path_str: str) -> List[str]:
-    if not isinstance(path_str, str):
-        return []
-    return [part.strip() for part in path_str.split(">") if part.strip()]
 
 
 def load_nodes(path: str) -> Dict[str, Node]:
@@ -93,7 +92,7 @@ def load_assets(path: str) -> Dict[str, Asset]:
     df = pd.read_csv(path)
     assets: Dict[str, Asset] = {}
     for _, row in df.iterrows():
-        asset = Asset(
+        assets[str(row["asset_id"])] = Asset(
             asset_id=str(row["asset_id"]),
             edge_id=str(row["edge_id"]),
             asset_type=str(row["asset_type"]),
@@ -103,8 +102,8 @@ def load_assets(path: str) -> Dict[str, Asset]:
             location_y=float(row["location_y"]),
             maintenance_cost_per_unit=float(row["maintenance_cost_per_unit"]),
             maintenance_duration_half_days=float(row["maintenance_duration_half_days"]),
+            usage_degradation_per_passage=float(row.get("usage_degradation_per_passage", 0.0)),
         )
-        assets[asset.asset_id] = asset
     return assets
 
 
@@ -116,7 +115,9 @@ def load_passenger_flows(path: str) -> List[PassengerFlow]:
             flow_id=str(row["flow_id"]),
             origin=str(row["origin"]),
             destination=str(row["destination"]),
-            passengers=int(row["passengers"]),
+            start_time_hour=int(row["start_time_hour"]),
+            end_time_hour=int(row["end_time_hour"]),
+            rate_per_hour=float(row["rate_per_hour"]),
         )
         flows.append(flow)
     return flows
