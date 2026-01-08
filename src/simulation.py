@@ -29,8 +29,8 @@ class NetworkGraph:
         adjacency: Dict[str, List[Tuple[str, str]]] = {node_id: [] for node_id in nodes}
         for edge_id, edge in edges.items():
             adjacency[edge.start_node].append((edge.end_node, edge_id))
-            if edge.bidirectional:
-                adjacency[edge.end_node].append((edge.start_node, edge_id))
+            # always bidirectional
+            adjacency[edge.end_node].append((edge.start_node, edge_id))
         return NetworkGraph(nodes=nodes, edges=edges, assets=assets, adjacency=adjacency)
 
     def find_path(
@@ -214,7 +214,7 @@ class NetworkSimulator:
             
             # Travel time increases with degraded condition
             slowdown = 1.0 + (1.0 - edge_condition)
-            travel_time = (edge.base_travel_time_min / 60.0) * slowdown
+            travel_time = (edge.capacity_at_day / 60.0) * slowdown # TODO Night also
             yield self.env.timeout(travel_time)
             current_time = self.env.now
 

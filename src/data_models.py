@@ -10,7 +10,6 @@ class Node:
     node_id: str
     location_x: float
     location_y: float
-    is_terminal: bool
 
 
 @dataclass
@@ -18,9 +17,10 @@ class Edge:
     edge_id: str
     start_node: str
     end_node: str
-    base_travel_time_min: float
-    capacity_per_hour: int
-    bidirectional: bool = True
+    base_travel_time_min: int
+    mode: str
+    capacity_at_day: int
+    capacity_at_night: int
 
 
 @dataclass
@@ -31,7 +31,9 @@ class Asset:
     condition_initial: float
     condition_transition_rate: float
     maintenance_cost_per_unit: float
-    maintenance_duration_hours: float
+    maintenance_duration_half_days: float
+    location_x: float
+    location_y: float
 
 
 @dataclass
@@ -39,9 +41,7 @@ class PassengerFlow:
     flow_id: str
     origin: str
     destination: str
-    start_time_hour: float
-    end_time_hour: float
-    rate_per_hour: float
+    passengers: int
 
 
 @dataclass
@@ -81,9 +81,10 @@ def load_edges(path: str) -> Dict[str, Edge]:
             edge_id=str(row["edge_id"]),
             start_node=str(row["start_node"]),
             end_node=str(row["end_node"]),
+            mode=str(row["mode"]),
             base_travel_time_min=float(row["base_travel_time_min"]),
-            capacity_per_hour=int(row["capacity_per_hour"]),
-            bidirectional=bidirectional,
+            capacity_at_day=int(row["capacity_at_day"]),
+            capacity_at_night=int(row["capacity_at_night"]),
         )
         edges[edge.edge_id] = edge
     return edges
