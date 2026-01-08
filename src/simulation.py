@@ -223,12 +223,15 @@ class NetworkSimulator:
         self.total_passengers += 1
 
     def _passenger_source(self, flow: PassengerFlow) -> Generator[simpy.events.Timeout, None, None]:
-        current_time = flow.start_time_hour
-        while current_time < flow.end_time_hour and current_time < self.horizon_hours:
-            self.env.process(self._passenger_trip(flow, current_time))
-            interarrival = self.rng.exponential(1.0 / max(flow.rate_per_hour, 1e-6))
-            current_time += interarrival
-            yield self.env.timeout(max(0.0, current_time - self.env.now))
+        # The provided PassengerFlow objects only contain a passenger count
+        # (see data_models.load_passenger_flows). Schedule one trip per passenger
+        # at time 0 so the simulator can process them without requiring
+        # start/end time or rate attributes.
+        for _ in range(max(0, int(getattr(flow, "passengers", 0)))):
+            self.env.process(self._passenger_trip(flow, 0.0))
+        # Yield to allow the environment to progress; all trips are scheduled
+        # immediately so no timed waits are necessary here.
+        yield self.env.timeout(0.0)
 
     def run(self) -> SimulationResult:
         for flow in self.flows:
@@ -250,10 +253,17 @@ def simulate_schedule(
     nodes: Dict[str, Node],
     edges: Dict[str, Edge],
     assets: Dict[str, Asset],
-    flows: List[PassengerFlow],
+    flows_day: List[PassengerFlow],
+    flows_night: List[PassengerFlow],
     schedule: Dict[str, float],
-    horizon_hours: float,
     rng: np.random.Generator,
+    horizon_hours: float = 24.0,
 ) -> SimulationResult:
+    # Combine day and night flows into a single list for the simulator
+    flows: List[PassengerFlow] = []
+    if flows_day:
+        flows.extend(flows_day)
+    if flows_night:
+        flows.extend(flows_night)
     simulator = NetworkSimulator(nodes, edges, assets, flows, schedule, horizon_hours, rng)
     return simulator.run()
