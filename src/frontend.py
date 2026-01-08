@@ -127,6 +127,50 @@ fallback_edges = [
     ("N4", "N1"),
 ]
 
+def _parse_lon_lat_path(value) -> list[tuple[float, float]]:
+    """Parse a polyline from CSV.
+
+    Supported formats:
+    - JSON array of [lon, lat] pairs: [[8.5, 47.3], [8.6, 47.35]]
+    - JSON array of objects: [{"lon": 8.5, "lat": 47.3}, ...]
+
+    Returns list of (lon, lat). Empty list on missing/invalid.
+    """
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return []
+
+    if isinstance(value, (list, tuple)):
+        raw = value
+    else:
+        s = str(value).strip()
+        if not s:
+            return []
+        try:
+            raw = json.loads(s)
+        except Exception:
+            return []
+
+    pts: list[tuple[float, float]] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                try:
+                    lon = float(item[0])
+                    lat = float(item[1])
+                    pts.append((lon, lat))
+                except Exception:
+                    continue
+            elif isinstance(item, dict) and "lon" in item and "lat" in item:
+                try:
+                    pts.append((float(item["lon"]), float(item["lat"])))
+                except Exception:
+                    continue
+    return pts
+
+
+def _edge_key(a: str, b: str) -> str:
+    return f"{a}->{b}"
+
 try:
     print(f"[DEBUG frontend] reading edges from {edges_csv_path}", flush=True)
     df_edges = pd.read_csv(edges_csv_path)
@@ -138,20 +182,67 @@ try:
     df_edges = df_edges.dropna(subset=["start_node", "end_node"]).copy()
     df_edges["capacity_at_day"] = pd.to_numeric(df_edges["capacity_at_day"], errors="coerce")
 
-    # Keep capacity with each edge so we can scale line width.
+    # Keep capacity + mode with each edge so we can style and optionally route it.
     edges = []
     for r in df_edges.itertuples(index=False):
         a = str(getattr(r, "start_node"))
         b = str(getattr(r, "end_node"))
         cap = getattr(r, "capacity_at_day", None)
         cap_val = float(cap) if cap is not None and not pd.isna(cap) else None
-        edges.append({"a": a, "b": b, "capacity_at_day": cap_val})
+        mode_val = getattr(r, "mode", None) if "mode" in df_edges.columns else None
+        edges.append({"a": a, "b": b, "capacity_at_day": cap_val, "mode": (str(mode_val) if mode_val is not None and not pd.isna(mode_val) else None)})
     print(f"[DEBUG frontend] loaded {len(edges)} edges", flush=True)
     if len(edges) == 0:
         edges = fallback_edges
 except Exception as e:
     st.warning(f"Could not read edges from {edges_csv_path}: {e}. Falling back to hardcoded edges.")
     edges = fallback_edges
+
+# Optional: load train (Zug) polylines from data/edge_paths_train.csv
+edge_paths_csv_path = data_dir / "edge_paths_train.csv"
+train_paths: dict[str, list[tuple[float, float]]] = {}
+_train_paths_load_error: str | None = None
+try:
+    if edge_paths_csv_path.exists():
+        # NOTE: path_lon_lat contains commas. In CSV this MUST be quoted, e.g.
+        # "[[8.53,47.04],[8.54,47.05]]"
+        # We use the python engine + backslash escape to be more forgiving.
+        try:
+            df_paths = pd.read_csv(edge_paths_csv_path, engine="python", escapechar="\\")
+        except Exception:
+            # Fallback: allow a pipe-separated file if you prefer to avoid quoting JSON.
+            df_paths = pd.read_csv(edge_paths_csv_path, sep="|", engine="python")
+
+        required_path_cols = {"start_node", "end_node", "path_lon_lat"}
+        if not required_path_cols.issubset(set(df_paths.columns)):
+            raise ValueError(
+                f"edge_paths_train.csv must contain columns {sorted(required_path_cols)}; got {sorted(df_paths.columns)}"
+            )
+        df_paths = df_paths.dropna(subset=["start_node", "end_node"]).copy()
+        for r in df_paths.itertuples(index=False):
+            a = str(getattr(r, "start_node"))
+            b = str(getattr(r, "end_node"))
+            path_val = getattr(r, "path_lon_lat", None)
+            pts = _parse_lon_lat_path(path_val)
+            if pts:
+                train_paths[_edge_key(a, b)] = pts
+except Exception as e:
+    _train_paths_load_error = str(e)
+    st.warning(f"Could not read train edge paths from {edge_paths_csv_path}: {e}. Falling back to straight lines.")
+
+with st.sidebar:
+    st.caption(
+        "Train routes (mode=Zug) can optionally be drawn from data/edge_paths_train.csv "
+        "(columns: start_node,end_node,path_lon_lat)."
+    )
+    st.caption(
+        "If you use comma-separated CSV, wrap path_lon_lat in quotes, e.g. "
+        "\"[[8.53,47.04],[8.54,47.05]]\". "
+        "Alternatively you can use a pipe-separated file (same name) with rows like: "
+        "start_node|end_node|path_lon_lat"
+    )
+    if _train_paths_load_error:
+        st.warning(f"edge_paths_train.csv parse error: {_train_paths_load_error}")
 
 # Build coordinate maps
 coord = {n["id"]: (n["lon"], n["lat"]) for n in nodes}
@@ -203,17 +294,44 @@ def _edge_width_from_capacity(capacity_at_day: float | None) -> float:
 if len(edges) > 0 and isinstance(edges[0], dict):
     for e in edges:
         a, b = e["a"], e["b"]
-        lon_a, lat_a = coord[a]
-        lon_b, lat_b = coord[b]
+        if a not in coord or b not in coord:
+            continue
+
+        # Use polyline only for trains and only if we have a path.
+        pts: list[tuple[float, float]] = []
+        if (e.get("mode") or "").strip() == "Zug" or (e.get("mode") or "").strip() == "Schiff":
+            pts = train_paths.get(_edge_key(a, b), [])
+
+        # If a path exists, ensure it connects the endpoints (prepend/append if needed).
+        if pts:
+            lon_a, lat_a = coord[a]
+            lon_b, lat_b = coord[b]
+            if (abs(pts[0][0] - lon_a) > 1e-6) or (abs(pts[0][1] - lat_a) > 1e-6):
+                pts = [(lon_a, lat_a)] + pts
+            if (abs(pts[-1][0] - lon_b) > 1e-6) or (abs(pts[-1][1] - lat_b) > 1e-6):
+                pts = pts + [(lon_b, lat_b)]
+
+        if pts:
+            lon = [p[0] for p in pts]
+            lat = [p[1] for p in pts]
+        else:
+            lon_a, lat_a = coord[a]
+            lon_b, lat_b = coord[b]
+            lon = [lon_a, lon_b]
+            lat = [lat_a, lat_b]
+
         w = _edge_width_from_capacity(e.get("capacity_at_day"))
         edge_traces.append(
             go.Scattermapbox(
-                lon=[lon_a, lon_b],
-                lat=[lat_a, lat_b],
+                lon=lon,
+                lat=lat,
                 mode="lines",
-                line=dict(width=w, color="blue"),
+                line=dict(width=w, color="blue" if (e.get("mode") or "").strip() == "Zug" else "#888"),
                 hovertemplate=(
-                    f"<b>{a} → {b}</b><br>capacity_at_day: {e.get('capacity_at_day')}<extra></extra>"
+                    f"<b>{a} → {b}</b><br>"
+                    f"mode: {e.get('mode')}<br>"
+                    f"capacity_at_day: {e.get('capacity_at_day')}<br>"
+                    f"path_points: {len(pts) if pts else 0}<extra></extra>"
                 ),
             )
         )
