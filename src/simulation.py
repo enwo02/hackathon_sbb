@@ -113,7 +113,7 @@ class NetworkSimulator:
             asset = assets[asset_id]
             self.maintenance_windows[asset_id] = MaintenanceWindow(
                 start_hour=start,
-                end_hour=start + asset.maintenance_duration_hours,
+                end_hour=start + asset.maintenance_duration_half_days,
             )
         self.total_travel_time = 0.0
         self.total_passengers = 0
@@ -126,7 +126,7 @@ class NetworkSimulator:
         cost = 0.0
         for asset_id in plan:
             asset = self.assets[asset_id]
-            cost += asset.maintenance_cost_per_unit * asset.maintenance_duration_hours
+            cost += asset.maintenance_cost_per_unit * asset.maintenance_duration_half_days
         return cost
 
     def _asset_condition(self, asset_id: str, current_time: float) -> float:

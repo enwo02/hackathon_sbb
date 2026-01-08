@@ -14,8 +14,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--nodes", default="data/nodes_template.csv", help="Path to nodes csv")
     parser.add_argument("--edges", default="data/edges_template.csv", help="Path to edges csv")
     parser.add_argument("--assets", default="data/assets_template.csv", help="Path to assets csv")
-    parser.add_argument("--flows", default="data/passenger_flows_template.csv", help="Path to passenger flows csv")
-    parser.add_argument("--horizon", type=float, default=168.0, help="Simulation horizon in hours")
+    parser.add_argument("--flowsday", default="data/passenger_flows_day.csv", help="Path to passenger flows at day csv")
+    parser.add_argument("--flowsnight", default="data/passenger_flows_night.csv", help="Path to passenger flows at night csv")
     parser.add_argument("--population", type=int, default=20, help="NSGA-II population size")
     parser.add_argument("--generations", type=int, default=10, help="NSGA-II generations")
     parser.add_argument("--cx", type=float, default=0.3, help="Crossover probability")
@@ -44,16 +44,16 @@ def main() -> None:
     nodes = load_nodes(args.nodes)
     edges = load_edges(args.edges)
     assets = load_assets(args.assets)
-    flows = load_passenger_flows(args.flows)
+    flows_day = load_passenger_flows(args.flowsday)
+    flows_night = load_passenger_flows(args.flowsnight)
     config = GAConfig(
         population_size=args.population,
         generations=args.generations,
         crossover_prob=args.cx,
         mutation_prob=args.mut,
-        horizon_hours=args.horizon,
         weights=tuple(args.weights),
     )
-    optimizer = NSGA2Optimizer(nodes, edges, assets, flows, config)
+    optimizer = NSGA2Optimizer(nodes, edges, assets, flows_day, flows_night, config)
     best_schedule, best_metrics, pareto = optimizer.run()
     save_schedule(args.output, best_schedule)
     summary = {

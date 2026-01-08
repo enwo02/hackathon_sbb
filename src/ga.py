@@ -9,6 +9,8 @@ from deap import algorithms, base, creator, tools
 from data_models import Asset, Edge, Node, PassengerFlow, SimulationResult
 from simulation import simulate_schedule
 
+# TODO Doppelt in simulation.py??
+MAX_SIM_TIME = 2*365
 
 @dataclass
 class GAConfig:
@@ -16,16 +18,16 @@ class GAConfig:
     generations: int = 10
     crossover_prob: float = 0.3
     mutation_prob: float = 0.1
-    horizon_hours: float = 168.0
     weights: Tuple[float, float, float] = (0.3, 0.4, 0.3)
 
 
 class NSGA2Optimizer:
-    def __init__(self, nodes: Dict[str, Node], edges: Dict[str, Edge], assets: Dict[str, Asset], flows: List[PassengerFlow], config: GAConfig) -> None:
+    def __init__(self, nodes: Dict[str, Node], edges: Dict[str, Edge], assets: Dict[str, Asset], flows_day: List[PassengerFlow], flows_night: List[PassengerFlow], config: GAConfig) -> None:
         self.nodes = nodes
         self.edges = edges
         self.assets = assets
-        self.flows = flows
+        self.flows_day = flows_day
+        self.flows_night = flows_night
         self.config = config
         self.asset_ids = list(assets.keys())
         self.rng = np.random.default_rng(42)
@@ -54,12 +56,12 @@ class NSGA2Optimizer:
         self.toolbox.register("evaluate", self._evaluate)
 
     def _random_start(self) -> float:
-        return random.uniform(0.0, self.config.horizon_hours)
+        return random.uniform(0.0, MAX_SIM_TIME)
 
     def _max_start(self, idx: int) -> float:
         asset_id = self.asset_ids[idx % len(self.asset_ids)]
         asset = self.assets[asset_id]
-        return max(0.0, self.config.horizon_hours - asset.maintenance_duration_hours)
+        return max(0.0, MAX_SIM_TIME - asset.maintenance_duration_half_days)
 
     def _bounds_correction(self, individual: List[float]) -> None:
         for i in range(len(individual)):
@@ -73,9 +75,9 @@ class NSGA2Optimizer:
             self.nodes,
             self.edges,
             self.assets,
-            self.flows,
+            self.flows_day,
+            self.flows_night,
             schedule,
-            self.config.horizon_hours,
             rng=self.rng,
         )
         w_condition, w_travel, w_cost = self.config.weights

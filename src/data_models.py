@@ -67,7 +67,6 @@ def load_nodes(path: str) -> Dict[str, Node]:
             node_id=str(row["node_id"]),
             location_x=float(row["location_x"]),
             location_y=float(row["location_y"]),
-            is_terminal=bool(row["is_terminal"]),
         )
     return nodes
 
@@ -100,8 +99,10 @@ def load_assets(path: str) -> Dict[str, Asset]:
             asset_type=str(row["asset_type"]),
             condition_initial=float(row["condition_initial"]),
             condition_transition_rate=float(row["condition_transition_rate"]),
+            location_x=float(row["location_x"]),
+            location_y=float(row["location_y"]),
             maintenance_cost_per_unit=float(row["maintenance_cost_per_unit"]),
-            maintenance_duration_hours=float(row["maintenance_duration_hours"]),
+            maintenance_duration_half_days=float(row["maintenance_duration_half_days"]),
         )
         assets[asset.asset_id] = asset
     return assets
@@ -115,9 +116,7 @@ def load_passenger_flows(path: str) -> List[PassengerFlow]:
             flow_id=str(row["flow_id"]),
             origin=str(row["origin"]),
             destination=str(row["destination"]),
-            start_time_hour=float(row["start_time_hour"]),
-            end_time_hour=float(row["end_time_hour"]),
-            rate_per_hour=float(row["rate_per_hour"]),
+            passengers=int(row["passengers"]),
         )
         flows.append(flow)
     return flows
