@@ -1,5 +1,6 @@
 # filepath: /Users/eliowanner/Documents/local_stuff/hackathon_sbb_2026/test2/hackathon_sbb/src/frontend.py
 # Streamlit frontend (self-contained, hardcoded sample data)
+# run with "streamlit run src/frontend.py"
 
 import streamlit as st
 import pandas as pd
@@ -7,6 +8,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import date, timedelta
 import math
+from pathlib import Path
 
 st.set_page_config(page_title="Schedule Visualizer", layout="wide")
 
@@ -36,14 +38,41 @@ st.json(best_result)
 # Part 1: Map with nodes and edges (hardcoded 5 nodes)
 st.subheader("Network map (mocked)")
 
-# Mock nodes with coordinates (latitude, longitude)
-nodes = [
+# Load nodes from CSV (data/nodes.csv). Format:
+# node_id,location_x,location_y  (location_x=lat, location_y=lon)
+data_dir = Path(__file__).resolve().parents[1] / "data"
+nodes_csv_path = data_dir / "nodes.csv"
+
+fallback_nodes = [
     {"id": "N1", "lat": 47.3769, "lon": 8.5417},  # Zurich
     {"id": "N2", "lat": 46.9480, "lon": 7.4474},  # Bern
     {"id": "N3", "lat": 46.2044, "lon": 6.1432},  # Geneva
     {"id": "N4", "lat": 47.5596, "lon": 7.5886},  # Basel
     {"id": "N5", "lat": 46.5197, "lon": 6.6323},  # Lausanne
 ]
+
+try:
+    df_nodes = pd.read_csv(nodes_csv_path)
+    required_cols = {"node_id", "location_x", "location_y"}
+    if not required_cols.issubset(set(df_nodes.columns)):
+        raise ValueError(
+            f"nodes.csv must contain columns {sorted(required_cols)}; got {sorted(df_nodes.columns)}"
+        )
+
+    df_nodes = df_nodes.dropna(subset=["node_id", "location_x", "location_y"]).copy()
+    df_nodes["location_x"] = pd.to_numeric(df_nodes["location_x"], errors="coerce")
+    df_nodes["location_y"] = pd.to_numeric(df_nodes["location_y"], errors="coerce")
+    df_nodes = df_nodes.dropna(subset=["location_x", "location_y"]).reset_index(drop=True)
+
+    nodes = [
+        {"id": str(r.node_id), "lat": float(r.location_x), "lon": float(r.location_y)}
+        for r in df_nodes.itertuples(index=False)
+    ]
+    if len(nodes) == 0:
+        nodes = fallback_nodes
+except Exception as e:
+    st.warning(f"Could not read nodes from {nodes_csv_path}: {e}. Falling back to hardcoded nodes.")
+    nodes = fallback_nodes
 
 # Mock edges as tuples of node ids
 edges = [
@@ -56,6 +85,12 @@ edges = [
 
 # Build coordinate maps
 coord = {n["id"]: (n["lon"], n["lat"]) for n in nodes}
+
+# If we loaded nodes from CSV, the old hardcoded edge ids probably don't match.
+# In that case, build a simple chain graph connecting consecutive nodes.
+if any(a not in coord or b not in coord for a, b in edges):
+    node_ids = [n["id"] for n in nodes]
+    edges = list(zip(node_ids, node_ids[1:])) if len(node_ids) > 1 else []
 
 # Create a Plotly figure: lines for edges and scatter for nodes
 edge_traces = []
@@ -83,11 +118,17 @@ node_trace = go.Scattermapbox(
 
 # Compose and display map. Use an open-access map style that doesn't require a Mapbox token.
 fig_map = go.Figure(data=edge_traces + [node_trace])
+if len(nodes) > 0:
+    center_lat = sum(n["lat"] for n in nodes) / len(nodes)
+    center_lon = sum(n["lon"] for n in nodes) / len(nodes)
+else:
+    center_lat, center_lon = 46.8, 8.0
+
 fig_map.update_layout(
     mapbox=dict(
         style="open-street-map",
-        center=dict(lat=46.8, lon=8.0),
-        zoom=6,
+        center=dict(lat=float(center_lat), lon=float(center_lon)),
+        zoom=9,
     ),
     margin={"l": 0, "r": 0, "t": 0, "b": 0},
     height=450,
