@@ -9,10 +9,37 @@ import plotly.express as px
 from datetime import date, timedelta
 import math
 from pathlib import Path
+import subprocess
+import sys
 
 st.set_page_config(page_title="Schedule Visualizer", layout="wide")
 
 st.title("Bio-Construction-Schedular")
+
+# ---- NSGA-II controls (sidebar) ----
+with st.sidebar:
+    st.header("Run NSGA-II")
+    w1 = st.slider("Weight: condition", 0.0, 1.0, 0.3, 0.01)
+    w2 = st.slider("Weight: travel time", 0.0, 1.0, 0.4, 0.01)
+    w3 = st.slider("Weight: cost", 0.0, 1.0, 0.3, 0.01)
+    # Normalize weights so they sum to 1 (avoid passing all zeros)
+    _total_w = float(w1 + w2 + w3)
+    if _total_w <= 0:
+        weights = (0.33, 0.34, 0.33)
+    else:
+        weights = (w1 / _total_w, w2 / _total_w, w3 / _total_w)
+    st.write(f"Normalized weights: {weights[0]:.2f}, {weights[1]:.2f}, {weights[2]:.2f}")
+
+    horizon = st.slider("Horizon (hours)", 1.0, 1000.0, 168.0, 1.0)
+    population = st.slider("Population", 4, 1000, 40, 1)
+    cx = st.slider("Crossover (cx)", 0.0, 1.0, 0.3, 0.01)
+    mut = st.slider("Mutation (mut)", 0.0, 1.0, 0.1, 0.01)
+    run_now = st.button("Run NSGA-II")
+    status_area = st.empty()
+
+    # Optionally show generations/seed inputs if needed
+    generations = st.number_input("Generations", min_value=1, max_value=10000, value=30, step=1)
+    seed = st.number_input("Random seed", min_value=0, max_value=2**31 - 1, value=42, step=1)
 
 # Hardcoded "best result" (mocked, matches the structure you showed)
 best_result = {
@@ -52,6 +79,7 @@ fallback_nodes = [
 ]
 
 try:
+    print(f"[DEBUG frontend] reading nodes from {nodes_csv_path}", flush=True)
     df_nodes = pd.read_csv(nodes_csv_path)
     required_cols = {"node_id", "location_x", "location_y"}
     if not required_cols.issubset(set(df_nodes.columns)):
@@ -68,6 +96,7 @@ try:
         {"id": str(r.node_id), "lat": float(r.location_x), "lon": float(r.location_y)}
         for r in df_nodes.itertuples(index=False)
     ]
+    print(f"[DEBUG frontend] loaded {len(nodes)} nodes", flush=True)
     if len(nodes) == 0:
         nodes = fallback_nodes
 except Exception as e:
@@ -84,6 +113,7 @@ fallback_edges = [
 ]
 
 try:
+    print(f"[DEBUG frontend] reading edges from {edges_csv_path}", flush=True)
     df_edges = pd.read_csv(edges_csv_path)
     required_edge_cols = {"start_node", "end_node", "capacity_at_day"}
     if not required_edge_cols.issubset(set(df_edges.columns)):
@@ -101,6 +131,7 @@ try:
         cap = getattr(r, "capacity_at_day", None)
         cap_val = float(cap) if cap is not None and not pd.isna(cap) else None
         edges.append({"a": a, "b": b, "capacity_at_day": cap_val})
+    print(f"[DEBUG frontend] loaded {len(edges)} edges", flush=True)
     if len(edges) == 0:
         edges = fallback_edges
 except Exception as e:
@@ -317,12 +348,70 @@ with col_right:
 
 # Footer with weighted objectives
 st.subheader("Weighted objectives (mocked)")
-wo = best_result["weighted_objectives"]
-st.write(f"Condition penalty: {wo['condition_penalty']}")
-st.write(f"Travel penalty: {wo['travel_penalty']}")
-st.write(f"Cost penalty: {wo['cost_penalty']}")
+# Some test fixtures of `best_result` may use the key `objectives` instead of
+# `weighted_objectives`. Fall back safely and show sensible defaults.
+if "weighted_objectives" in best_result and isinstance(best_result["weighted_objectives"], dict):
+    wo = best_result["weighted_objectives"]
+else:
+    obj = best_result.get("objectives", {})
+    wo = {
+        "condition_penalty": obj.get("avg_condition", "N/A"),
+        "travel_penalty": obj.get("avg_travel_time", "N/A"),
+        "cost_penalty": obj.get("total_cost", "N/A"),
+    }
+
+st.write(f"Condition penalty: {wo.get('condition_penalty')}")
+st.write(f"Travel penalty: {wo.get('travel_penalty')}")
+st.write(f"Cost penalty: {wo.get('cost_penalty')}")
 
 # Raw result at the bottom
 st.divider()
 with st.expander("Raw result JSON", expanded=False):
     st.json(best_result)
+
+# If user clicked Run, execute src/main.py with provided arguments and show output
+if 'run_now' in globals() and run_now:
+    project_root = Path(__file__).resolve().parents[1]
+    main_script = project_root / "src" / "main.py"
+    cmd = [sys.executable, str(main_script),
+           "--weights", f"{weights[0]}", f"{weights[1]}", f"{weights[2]}",
+           "--horizon", str(float(horizon)),
+           "--population", str(int(population)),
+           "--cx", str(float(cx)),
+           "--mut", str(float(mut)),
+           "--generations", str(int(generations)),
+           "--seed", str(int(seed))]
+
+    # Show command for debugging
+    st.sidebar.write("Running command:")
+    st.sidebar.code(" ".join(cmd))
+    print(f"[DEBUG frontend] running subprocess cmd: {' '.join(cmd)}", flush=True)
+
+    # Update status area and run subprocess
+    status_area.info("Queued — starting subprocess...")
+    with st.spinner("Running NSGA-II (this may take a while)..."):
+        try:
+            status_area.info("Running NSGA-II...")
+            proc = subprocess.run(cmd, cwd=str(project_root), capture_output=True, text=True)
+            rc = proc.returncode
+            stdout = proc.stdout
+            stderr = proc.stderr
+        except Exception as e:
+            rc = None
+            stdout = ""
+            stderr = str(e)
+            status_area.error(f"Failed to start subprocess: {e}")
+    print(f"[DEBUG frontend] subprocess finished rc={rc}", flush=True)
+    print(f"[DEBUG frontend] subprocess stdout sample:\n{stdout[:800]}", flush=True)
+    print(f"[DEBUG frontend] subprocess stderr sample:\n{stderr[:800]}", flush=True)
+
+    # Finalize status
+    if rc == 0:
+        status_area.success(f"Finished successfully (rc={rc}) ✅")
+    else:
+        status_area.error(f"Finished with return code={rc}")
+
+    with st.expander("Stdout", expanded=True):
+        st.text(stdout)
+    with st.expander("Stderr", expanded=False):
+        st.text(stderr)
