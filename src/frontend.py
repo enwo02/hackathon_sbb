@@ -40,8 +40,8 @@ with col_left:
 # Load nodes from CSV (data/nodes.csv). Format:
 # node_id,location_x,location_y  (location_x=lat, location_y=lon)
 data_dir = Path(__file__).resolve().parents[1] / "data"
-nodes_csv_path = data_dir / "nodes.csv"
-edges_csv_path = data_dir / "edges.csv"
+nodes_csv_path = data_dir / "nodes_template.csv"
+edges_csv_path = data_dir / "edges_template.csv"
 
 fallback_nodes = [
     {"id": "N1", "lat": 47.3769, "lon": 8.5417},  # Zurich
