@@ -12,6 +12,7 @@ from pathlib import Path
 import json
 import subprocess
 import sys
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="Schedule Visualizer", layout="wide")
 
@@ -59,6 +60,8 @@ with st.sidebar:
     # Optionally show generations/seed inputs if needed
     generations = st.number_input("Generations", min_value=1, max_value=10000, value=30, step=1)
     seed = st.number_input("Random seed", min_value=0, max_value=2**31 - 1, value=42, step=1)
+    # Auto-refresh is forced on (no UI controls to disable). Interval fixed at 0.5s.
+    pass
 
 try:
     with open(summary_json_path, "r", encoding="utf-8") as f:
@@ -68,6 +71,23 @@ try:
 except Exception as e:
     st.warning(f"Could not read {summary_json_path}: {e}. Falling back to hardcoded sample data.")
     best_result = fallback_best_result
+else:
+    # Show last-modified time (if available)
+    try:
+        mtime = summary_json_path.stat().st_mtime
+        import datetime
+
+        lm = datetime.datetime.fromtimestamp(mtime).isoformat()
+        st.sidebar.write(f"Loaded summary.json (last modified: {lm})")
+    except Exception:
+        st.sidebar.write("Loaded summary.json")
+
+# Force auto-refresh every 0.5 seconds (no disable option)
+try:
+    ms = int(0.5 * 1000)
+    components.html(f"<script>setTimeout(()=>location.reload(), {ms});</script>", height=0)
+except Exception as e:
+    print(f"[DEBUG frontend] failed to inject forced auto-refresh script: {e}", flush=True)
 
 # Backwards-compatible shim (if some older file still uses weighted_objectives)
 if "objectives" not in best_result and "weighted_objectives" in best_result:
