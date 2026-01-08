@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Callable, Optional
 
 import numpy as np
 from deap import base, creator, tools
@@ -56,6 +56,8 @@ class NSGA2Optimizer:
 
         self.toolbox = base.Toolbox()
         self._setup_deap()
+
+        self._progress_cb: Optional[Callable[[int, Dict[str, float], tuple, tools.ParetoFront], None]] = None
 
     def _setup_deap(self) -> None:
         # (served_trips, avg_condition, avg_travel_time, total_cost)
@@ -178,7 +180,9 @@ class NSGA2Optimizer:
         d = np.linalg.norm(norm - ideal_norm, axis=1)
         return pareto[int(np.argmin(d))]
 
-    def run(self):
+    def run(self, progress_cb: Optional[Callable[[int, Dict[str, float], tuple, tools.ParetoFront], None]] = None):
+        self._progress_cb = progress_cb
+
         pop = self.toolbox.population(n=self.config.population_size)
 
         # Evaluate initial population
@@ -190,6 +194,13 @@ class NSGA2Optimizer:
         pop = self.toolbox.select(pop, len(pop))
         hall = tools.ParetoFront()
         hall.update(pop)
+
+        # Generation 0 snapshot (after initial evaluation)
+        best0 = self._choose_solution_from_pareto(list(hall))
+        best_schedule0 = {asset_id: float(best0[i]) for i, asset_id in enumerate(self.asset_ids)}
+        best_metrics0 = best0.fitness.values
+        if self._progress_cb is not None:
+            self._progress_cb(0, best_schedule0, best_metrics0, hall)
 
         for _gen in range(1, self.config.generations + 1):
             offspring = tools.selTournamentDCD(pop, len(pop))
@@ -212,7 +223,14 @@ class NSGA2Optimizer:
             pop = self.toolbox.select(pop + offspring, self.config.population_size)
             hall.update(pop)
 
-        # Choose one representative “balanced” schedule from Pareto
+            # Choose representative “balanced” schedule from current Pareto
+            best_gen = self._choose_solution_from_pareto(list(hall))
+            best_schedule_gen = {asset_id: float(best_gen[i]) for i, asset_id in enumerate(self.asset_ids)}
+            best_metrics_gen = best_gen.fitness.values
+            if self._progress_cb is not None:
+                self._progress_cb(_gen, best_schedule_gen, best_metrics_gen, hall)
+
+        # Final best (already selected in last iteration above, but recompute for clarity)
         best = self._choose_solution_from_pareto(list(hall))
 
         best_schedule = {asset_id: float(best[i]) for i, asset_id in enumerate(self.asset_ids)}
