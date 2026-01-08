@@ -76,13 +76,38 @@ def main() -> None:
         seed=args.seed,
     )
 
+    # Write summary.json after each generation
+    summary_path = Path(args.output).parent / "summary.json"
+
+    def _write_summary(gen: int, schedule: dict, metrics: tuple, _pareto) -> None:
+        summary = {
+            "generation": int(gen),
+            "best_schedule": schedule,
+            "objectives": {
+                "served_adjusted": metrics[0],
+                "avg_condition": metrics[1],
+                "avg_travel_time": metrics[2],
+                "total_cost": metrics[3],
+            },
+            "notes": [
+                "Objectives are true multi-objective (NSGA-II): maximize served, condition; minimize travel time, cost.",
+                "Edge capacity modeled via simpy.Resource; maintenance reduces capacity & increases travel time.",
+                "Asset condition degrades with time and usage (usage_degradation_per_passage).",
+            ],
+        }
+        summary_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(summary_path, "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2)
+
     optimizer = NSGA2Optimizer(nodes, edges, assets, flows_day, flows_night, config)
-    best_schedule, best_metrics, pareto = optimizer.run()
+    best_schedule, best_metrics, pareto = optimizer.run(progress_cb=_write_summary)
 
     save_schedule(args.output, best_schedule)
     save_pareto(args.pareto_out, pareto)
 
-    summary = {
+    # Also print + persist final summary
+    final_summary = {
+        "generation": int(config.generations),
         "best_schedule": best_schedule,
         "objectives": {
             "served_adjusted": best_metrics[0],
@@ -96,11 +121,9 @@ def main() -> None:
             "Asset condition degrades with time and usage (usage_degradation_per_passage).",
         ],
     }
-    print(json.dumps(summary, indent=2))
-    # Save summary to output folder
-    summary_path = Path(args.output).parent / "summary.json"
-    with open(summary_path, "w") as f:
-        json.dump(summary, f, indent=2)
+    print(json.dumps(final_summary, indent=2))
+    with open(summary_path, "w", encoding="utf-8") as f:
+        json.dump(final_summary, f, indent=2)
 
 
 if __name__ == "__main__":
