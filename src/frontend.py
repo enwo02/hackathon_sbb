@@ -86,16 +86,22 @@ fallback_edges = [
 
 try:
     df_edges = pd.read_csv(edges_csv_path)
-    required_edge_cols = {"start_node", "end_node"}
+    required_edge_cols = {"start_node", "end_node", "capacity_at_day"}
     if not required_edge_cols.issubset(set(df_edges.columns)):
         raise ValueError(
             f"edges.csv must contain columns {sorted(required_edge_cols)}; got {sorted(df_edges.columns)}"
         )
     df_edges = df_edges.dropna(subset=["start_node", "end_node"]).copy()
-    edges = [
-        (str(r.start_node), str(r.end_node))
-        for r in df_edges.itertuples(index=False)
-    ]
+    df_edges["capacity_at_day"] = pd.to_numeric(df_edges["capacity_at_day"], errors="coerce")
+
+    # Keep capacity with each edge so we can scale line width.
+    edges = []
+    for r in df_edges.itertuples(index=False):
+        a = str(getattr(r, "start_node"))
+        b = str(getattr(r, "end_node"))
+        cap = getattr(r, "capacity_at_day", None)
+        cap_val = float(cap) if cap is not None and not pd.isna(cap) else None
+        edges.append({"a": a, "b": b, "capacity_at_day": cap_val})
     if len(edges) == 0:
         edges = fallback_edges
 except Exception as e:
@@ -106,25 +112,79 @@ except Exception as e:
 coord = {n["id"]: (n["lon"], n["lat"]) for n in nodes}
 
 # Filter edges that reference unknown nodes; if nothing remains, build a simple chain.
-edges = [(a, b) for (a, b) in edges if a in coord and b in coord]
-if len(edges) == 0:
-    node_ids = [n["id"] for n in nodes]
-    edges = list(zip(node_ids, node_ids[1:])) if len(node_ids) > 1 else []
+if len(edges) > 0 and isinstance(edges[0], dict):
+    edges = [e for e in edges if e["a"] in coord and e["b"] in coord]
+    if len(edges) == 0:
+        node_ids = [n["id"] for n in nodes]
+        edges = [
+            {"a": a, "b": b, "capacity_at_day": None}
+            for a, b in (list(zip(node_ids, node_ids[1:])) if len(node_ids) > 1 else [])
+        ]
+else:
+    # fallback_edges list of tuples
+    edges = [(a, b) for (a, b) in edges if a in coord and b in coord]
+    if len(edges) == 0:
+        node_ids = [n["id"] for n in nodes]
+        edges = list(zip(node_ids, node_ids[1:])) if len(node_ids) > 1 else []
 
 # Create a Plotly figure: lines for edges and scatter for nodes
 edge_traces = []
-for a, b in edges:
-    lon_a, lat_a = coord[a]
-    lon_b, lat_b = coord[b]
-    edge_traces.append(
-        go.Scattermapbox(
-            lon=[lon_a, lon_b],
-            lat=[lat_a, lat_b],
-            mode="lines",
-            line=dict(width=2, color="blue"),
-            hoverinfo="none",
+
+# Precompute capacity range for nicer scaling (typical values: ~1000–5000)
+_caps = []
+if len(edges) > 0 and isinstance(edges[0], dict):
+    _caps = [e.get("capacity_at_day") for e in edges if e.get("capacity_at_day") is not None]
+_cap_min = float(min(_caps)) if _caps else None
+_cap_max = float(max(_caps)) if _caps else None
+
+def _edge_width_from_capacity(capacity_at_day: float | None) -> float:
+    # Map capacity to a visually reasonable width range.
+    # For your current data (about 1000–5000), linear scaling gives clearer differences.
+    if capacity_at_day is None or capacity_at_day <= 0:
+        return 2.0
+
+    # If we don't have a range (missing data or constant capacity), fall back to a default.
+    if _cap_min is None or _cap_max is None or _cap_min == _cap_max:
+        return 4.0
+
+    # Normalize to [0, 1]
+    t = (float(capacity_at_day) - _cap_min) / (_cap_max - _cap_min)
+    t = max(0.0, min(1.0, t))
+
+    # Map to a width range that is visually distinct but not too thick.
+    min_w, max_w = 2.0, 10.0
+    return float(min_w + t * (max_w - min_w))
+
+if len(edges) > 0 and isinstance(edges[0], dict):
+    for e in edges:
+        a, b = e["a"], e["b"]
+        lon_a, lat_a = coord[a]
+        lon_b, lat_b = coord[b]
+        w = _edge_width_from_capacity(e.get("capacity_at_day"))
+        edge_traces.append(
+            go.Scattermapbox(
+                lon=[lon_a, lon_b],
+                lat=[lat_a, lat_b],
+                mode="lines",
+                line=dict(width=w, color="blue"),
+                hovertemplate=(
+                    f"<b>{a} → {b}</b><br>capacity_at_day: {e.get('capacity_at_day')}<extra></extra>"
+                ),
+            )
         )
-    )
+else:
+    for a, b in edges:
+        lon_a, lat_a = coord[a]
+        lon_b, lat_b = coord[b]
+        edge_traces.append(
+            go.Scattermapbox(
+                lon=[lon_a, lon_b],
+                lat=[lat_a, lat_b],
+                mode="lines",
+                line=dict(width=2, color="blue"),
+                hoverinfo="none",
+            )
+        )
 
 node_trace = go.Scattermapbox(
     lon=[n["lon"] for n in nodes],
