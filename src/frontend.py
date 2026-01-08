@@ -29,6 +29,8 @@ best_result = {
     },
 }
 
+best_result = {  "best_schedule": {    "Weggis_Kai": 89.58657060832036,    "Luzern_kai": 63.49969712347016,    "Luzern_Weiche_1": 126.33765035720386,    "Luzern_Weiche_2": 140.3128973471476,    "K\u00fcsnacht_Weiche_1": 134.05876541845157,    "Br\u00fccke_Luzern_K\u00fc": 119.3017887574167,    "Weggis_KS": 4.776391200102516,    "K\u00fc_KS": 26.05402015498437,    "AG_K\u00fc_Weiche_1": 107.68971042078351,    "AG_K\u00fc_Weiche_2": 146.86949220965687,    "AG_K\u00fc_Weiche_3": 162.03773622141608,    "AG_Ri_Tunnel1": 131.24715233463036,    "AG_Ri_Tunnel2": 122.8361689086846,    "AG_Ri_Weiche1": 126.73229739306042,    "Ri_Wegg_Seilen": 146.56842607168375,    "Ri_Wegg_Kabine": 90.61752346432978  },  "objectives": {    "served_adjusted": 10424.0,    "avg_condition": 0.9676958972132257,    "avg_travel_time": 0.1627745444338592,    "total_cost": 34480000.0  },  "notes": [    "Objectives are true multi-objective (NSGA-II): maximize served, condition; minimize travel time, cost.",    "Edge capacity modeled via simpy.Resource; maintenance reduces capacity & increases travel time.",    "Asset condition degrades with time and usage (usage_degradation_per_passage)."  ]}
+
 # Part 1: Map with nodes and edges
 col_left, col_right = st.columns([1, 1], gap="large")
 
@@ -285,9 +287,15 @@ tick_step = 7
 tickvals = list(range(0, max_end + tick_step, tick_step))
 ticktext = [_tick_label(v) for v in tickvals]
 
+# Dynamically size the chart so all assets are visible.
+# A fixed height clips rows when there are many assets.
+row_height_px = 28
+base_padding_px = 90
+chart_height = int(base_padding_px + row_height_px * max(1, len(df_bar)))
+
 fig_timeline.update_layout(
     barmode="stack",
-    height=150,
+    height=chart_height,
     margin={"l": 0, "r": 20, "t": 0, "b": 20},
     showlegend=False,
 )
