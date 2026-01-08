@@ -36,12 +36,13 @@ st.subheader("Raw Result JSON")
 st.json(best_result)
 
 # Part 1: Map with nodes and edges (hardcoded 5 nodes)
-st.subheader("Network map (mocked)")
+st.subheader("Network map")
 
 # Load nodes from CSV (data/nodes.csv). Format:
 # node_id,location_x,location_y  (location_x=lat, location_y=lon)
 data_dir = Path(__file__).resolve().parents[1] / "data"
 nodes_csv_path = data_dir / "nodes.csv"
+edges_csv_path = data_dir / "edges.csv"
 
 fallback_nodes = [
     {"id": "N1", "lat": 47.3769, "lon": 8.5417},  # Zurich
@@ -74,8 +75,8 @@ except Exception as e:
     st.warning(f"Could not read nodes from {nodes_csv_path}: {e}. Falling back to hardcoded nodes.")
     nodes = fallback_nodes
 
-# Mock edges as tuples of node ids
-edges = [
+# Load edges from CSV (data/edges.csv). For the map we only use start_node and end_node.
+fallback_edges = [
     ("N1", "N2"),
     ("N1", "N4"),
     ("N2", "N5"),
@@ -83,12 +84,30 @@ edges = [
     ("N4", "N1"),
 ]
 
+try:
+    df_edges = pd.read_csv(edges_csv_path)
+    required_edge_cols = {"start_node", "end_node"}
+    if not required_edge_cols.issubset(set(df_edges.columns)):
+        raise ValueError(
+            f"edges.csv must contain columns {sorted(required_edge_cols)}; got {sorted(df_edges.columns)}"
+        )
+    df_edges = df_edges.dropna(subset=["start_node", "end_node"]).copy()
+    edges = [
+        (str(r.start_node), str(r.end_node))
+        for r in df_edges.itertuples(index=False)
+    ]
+    if len(edges) == 0:
+        edges = fallback_edges
+except Exception as e:
+    st.warning(f"Could not read edges from {edges_csv_path}: {e}. Falling back to hardcoded edges.")
+    edges = fallback_edges
+
 # Build coordinate maps
 coord = {n["id"]: (n["lon"], n["lat"]) for n in nodes}
 
-# If we loaded nodes from CSV, the old hardcoded edge ids probably don't match.
-# In that case, build a simple chain graph connecting consecutive nodes.
-if any(a not in coord or b not in coord for a, b in edges):
+# Filter edges that reference unknown nodes; if nothing remains, build a simple chain.
+edges = [(a, b) for (a, b) in edges if a in coord and b in coord]
+if len(edges) == 0:
     node_ids = [n["id"] for n in nodes]
     edges = list(zip(node_ids, node_ids[1:])) if len(node_ids) > 1 else []
 
@@ -128,7 +147,7 @@ fig_map.update_layout(
     mapbox=dict(
         style="open-street-map",
         center=dict(lat=float(center_lat), lon=float(center_lon)),
-        zoom=9,
+        zoom=10,
     ),
     margin={"l": 0, "r": 0, "t": 0, "b": 0},
     height=450,
