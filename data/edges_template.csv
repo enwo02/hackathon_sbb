@@ -1,0 +1,5 @@
+edge_id,start_node,end_node,base_travel_time_min,capacity_per_hour,bidirectional
+E1,N1,N2,6,800,True
+E2,N1,N3,15,600,True
+E3,N3,N4,10,600,True
+E4,N4,N2,12,500,True

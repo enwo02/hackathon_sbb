@@ -1,0 +1,5 @@
+asset_id,edge_id,asset_type,condition_initial,condition_transition_rate,maintenance_cost_per_unit,maintenance_duration_hours
+A1,E1,bridge,0.85,0.01,120000,8
+A2,E2,tunnel,0.75,0.015,180000,12
+A3,E3,switch,0.70,0.02,90000,6
+A4,E4,signal,0.95,0.008,30000,4
