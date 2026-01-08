@@ -12,10 +12,7 @@ from pathlib import Path
 
 st.set_page_config(page_title="Schedule Visualizer", layout="wide")
 
-st.title("Hardcoded Frontend — Map + Calendar View")
-st.markdown(
-    "This is a self-contained Streamlit frontend that visualizes a mocked node/edge map and a simple calendar (Gantt) for assets."
-)
+st.title("Bio-Construction-Schedular")
 
 # Hardcoded "best result" (mocked, matches the structure you showed)
 best_result = {
@@ -32,11 +29,11 @@ best_result = {
     },
 }
 
-st.subheader("Raw Result JSON")
-st.json(best_result)
+# Part 1: Map with nodes and edges
+col_left, col_right = st.columns([1, 1], gap="large")
 
-# Part 1: Map with nodes and edges (hardcoded 5 nodes)
-st.subheader("Network map")
+with col_left:
+    st.subheader("Network map")
 
 # Load nodes from CSV (data/nodes.csv). Format:
 # node_id,location_x,location_y  (location_x=lat, location_y=lon)
@@ -211,12 +208,15 @@ fig_map.update_layout(
     ),
     margin={"l": 0, "r": 0, "t": 0, "b": 0},
     height=450,
+    showlegend=False,
 )
 
-st.plotly_chart(fig_map, width='stretch')
+with col_left:
+    st.plotly_chart(fig_map, width="stretch")
 
 # Part 2: Calendar / Gantt view for assets
-st.subheader("Calendar view (assets)")
+with col_right:
+    st.subheader("Construction schedule timeline")
 
 # Assets to show. We'll derive start day from the best_result values.
 assets = list(best_result["best_schedule"].keys())
@@ -255,10 +255,6 @@ df_schedule_plot = df_schedule[["Asset", "Start", "End"]].copy()
 df_schedule_plot["Start"] = df_schedule_plot["Start"].dt.to_pydatetime()
 df_schedule_plot["End"] = df_schedule_plot["End"].dt.to_pydatetime()
 
-# Show a table of schedule values
-st.write("Schedule table (start date computed by flooring the provided start float):")
-st.dataframe(df_schedule.assign(Start=df_schedule.Start.dt.date.astype(str), End=df_schedule.End.dt.date.astype(str)))
-
 # Create a Gantt-like timeline (manual) to avoid datetime/timedelta JSON issues.
 # We plot in "days since base_date" and format tick labels ourselves.
 df_bar = df_schedule.copy()
@@ -290,16 +286,26 @@ tickvals = list(range(0, max_end + tick_step, tick_step))
 ticktext = [_tick_label(v) for v in tickvals]
 
 fig_timeline.update_layout(
-    title="Assets timeline (each has length = 4 days)",
     barmode="stack",
-    height=300,
-    margin={"l": 100, "r": 20, "t": 40, "b": 20},
+    height=150,
+    margin={"l": 0, "r": 20, "t": 0, "b": 20},
     showlegend=False,
 )
 fig_timeline.update_yaxes(autorange="reversed")
 fig_timeline.update_xaxes(title_text="Date", tickmode="array", tickvals=tickvals, ticktext=ticktext)
 
-st.plotly_chart(fig_timeline, width="stretch")
+with col_right:
+    st.plotly_chart(fig_timeline, width="stretch")
+
+# Show a table of schedule values (below the chart)
+with col_right:
+    st.write("Schedule table (start date computed by flooring the provided start float):")
+    st.dataframe(
+        df_schedule.assign(
+            Start=df_schedule.Start.dt.date.astype(str),
+            End=df_schedule.End.dt.date.astype(str),
+        )
+    )
 
 # Footer with weighted objectives
 st.subheader("Weighted objectives (mocked)")
@@ -308,6 +314,7 @@ st.write(f"Condition penalty: {wo['condition_penalty']}")
 st.write(f"Travel penalty: {wo['travel_penalty']}")
 st.write(f"Cost penalty: {wo['cost_penalty']}")
 
-st.info(
-    "This frontend is fully hardcoded for demo purposes. Remove the mocks and load your CSVs from the data/ folder when you integrate it into the main app."
-)
+# Raw result at the bottom
+st.divider()
+with st.expander("Raw result JSON", expanded=False):
+    st.json(best_result)
