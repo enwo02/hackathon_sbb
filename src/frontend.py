@@ -12,6 +12,60 @@ from pathlib import Path
 import json
 import subprocess
 import sys
+import urllib.parse
+import urllib.request
+
+# --- Optional OSRM routing (for Bus edges) ---
+# Uses the public demo server by default. For production, run your own OSRM instance.
+OSRM_BASE_URL = "https://router.project-osrm.org"
+
+
+@st.cache_data(show_spinner=False, ttl=60 * 60)
+def _osrm_route_lon_lat(
+    lon_a: float,
+    lat_a: float,
+    lon_b: float,
+    lat_b: float,
+    *,
+    profile: str = "driving",
+    overview: str = "full",
+    geometries: str = "geojson",
+    timeout_s: float = 10.0,
+) -> list[tuple[float, float]]:
+    """Fetch a route polyline from OSRM.
+
+    Returns list of (lon, lat) points. Empty list on errors.
+    """
+    try:
+        coords = f"{lon_a:.6f},{lat_a:.6f};{lon_b:.6f},{lat_b:.6f}"
+        params = {
+            "overview": overview,
+            "geometries": geometries,
+        }
+        url = f"{OSRM_BASE_URL}/route/v1/{profile}/{coords}?{urllib.parse.urlencode(params)}"
+        req = urllib.request.Request(url, headers={"User-Agent": "hackathon_sbb_frontend"})
+        with urllib.request.urlopen(req, timeout=float(timeout_s)) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        routes = payload.get("routes")
+        if not routes:
+            return []
+        geom = routes[0].get("geometry")
+        if not geom:
+            return []
+        # With geometries=geojson, geometry is {"coordinates": [[lon,lat], ...], "type": "LineString"}
+        coords_list = geom.get("coordinates") if isinstance(geom, dict) else None
+        if not isinstance(coords_list, list):
+            return []
+        pts: list[tuple[float, float]] = []
+        for p in coords_list:
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                try:
+                    pts.append((float(p[0]), float(p[1])))
+                except Exception:
+                    continue
+        return pts
+    except Exception:
+        return []
 
 st.set_page_config(page_title="Schedule Visualizer", layout="wide")
 
@@ -299,8 +353,13 @@ if len(edges) > 0 and isinstance(edges[0], dict):
 
         # Use polyline only for trains and only if we have a path.
         pts: list[tuple[float, float]] = []
-        if (e.get("mode") or "").strip() == "Zug" or (e.get("mode") or "").strip() == "Schiff":
+        mode = (e.get("mode") or "").strip()
+        if mode in ("Zug", "Schiff"):
             pts = train_paths.get(_edge_key(a, b), [])
+        elif mode == "Bus":
+            lon_a, lat_a = coord[a]
+            lon_b, lat_b = coord[b]
+            pts = _osrm_route_lon_lat(lon_a, lat_a, lon_b, lat_b)
 
         # If a path exists, ensure it connects the endpoints (prepend/append if needed).
         if pts:
@@ -326,10 +385,10 @@ if len(edges) > 0 and isinstance(edges[0], dict):
                 lon=lon,
                 lat=lat,
                 mode="lines",
-                line=dict(width=w, color="blue" if (e.get("mode") or "").strip() == "Zug" else "#888"),
+                line=dict(width=w, color="blue" if mode == "Zug" else ("#2ca02c" if mode == "Bus" else "#888")),
                 hovertemplate=(
                     f"<b>{a} → {b}</b><br>"
-                    f"mode: {e.get('mode')}<br>"
+                    f"mode: {mode}<br>"
                     f"capacity_at_day: {e.get('capacity_at_day')}<br>"
                     f"path_points: {len(pts) if pts else 0}<extra></extra>"
                 ),
