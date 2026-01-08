@@ -1,0 +1,7 @@
+flow_id,origin,destination,passengers
+F1,Weggis,Luzern,1620
+F1,Weggis,Küsnacht_am_Rigi,450
+F2,Weggis,Rigi,547
+F3,Luzern,Küsnacht_am_Rigi,1541
+F4,Arth_Goldau,Rigi,360
+F5,Küsnacht_am_Rigi,Arth_Goldau,1152
