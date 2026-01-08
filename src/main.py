@@ -24,8 +24,8 @@ def parse_args() -> argparse.Namespace:
         help="Weights for condition, travel time, cost (sum=1)",
     )
     parser.add_argument("--horizon", type=float, default=168.0, help="Simulation horizon in hours")
-    parser.add_argument("--population", type=int, default=40, help="NSGA-II population size")
-    parser.add_argument("--generations", type=int, default=30, help="NSGA-II generations")
+    parser.add_argument("--population", type=int, default=4, help="NSGA-II population size")
+    parser.add_argument("--generations", type=int, default=1, help="NSGA-II generations")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--cx", type=float, default=0.3, help="Crossover")
     parser.add_argument("--mut", type=float, default=0.1, help="Mutation")
@@ -97,6 +97,10 @@ def main() -> None:
         ],
     }
     print(json.dumps(summary, indent=2))
+    # Save summary to output folder
+    summary_path = Path(args.output).parent / "summary.json"
+    with open(summary_path, "w") as f:
+        json.dump(summary, f, indent=2)
 
 
 if __name__ == "__main__":
