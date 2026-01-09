@@ -25,7 +25,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--horizon", type=float, default=168.0, help="Simulation horizon in hours")
     parser.add_argument("--population", type=int, default=4, help="NSGA-II population size")
     parser.add_argument("--generations", type=int, default=1, help="NSGA-II generations")
-    parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument("--seed", type=int, default=45, help="Random seed")
     parser.add_argument("--cx", type=float, default=0.3, help="Crossover")
     parser.add_argument("--mut", type=float, default=0.1, help="Mutation")
     parser.add_argument("--output", default="output/best_schedule.csv", help="Output csv for best schedule")

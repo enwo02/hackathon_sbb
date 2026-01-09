@@ -290,7 +290,7 @@ def _osrm_route_lon_lat(
 
 st.set_page_config(page_title="Schedule Visualizer", layout="wide")
 
-st.title("Bio-Construction-Schedular")
+st.title("Evolution x Mobility")
 
 # Load best_result from output/summary.json (fallback to a small hardcoded example)
 project_root = Path(__file__).resolve().parents[1]
@@ -1048,6 +1048,16 @@ with col_right:
         if len(plot_keys) == 0:
             st.info("No objectives to display (all excluded).")
         else:
+            # Map objective keys to descriptive titles
+            title_map = {
+                "condition_penalty": "Track Condition Penalty",
+                "avg_condition": "Average Track Condition",
+                "travel_penalty": "Travel Time Penalty",
+                "avg_travel_time": "Average Travel Time",
+                "total_cost": "Total Cost",
+                "cost_penalty": "Cost Penalty",
+            }
+
             cols = st.columns(len(plot_keys))
             for col, k in zip(cols, plot_keys):
                 with col:
@@ -1064,7 +1074,7 @@ with col_right:
                         go.Bar(
                             x=[k],
                             y=[val],
-                            marker_color=[_hex_color_from_string(str(k))],
+                            marker_color="#28a745",
                             text=[text_label],
                             textposition="auto",
                             textfont=dict(size=16),
@@ -1075,7 +1085,7 @@ with col_right:
                         height=220,
                         margin={"l": 20, "r": 20, "t": 30, "b": 20},
                         yaxis=dict(range=[ymin, ymax], title_text="Value"),
-                        title_text=k,
+                        title_text=title_map.get(k, k.replace("_", " ").title()),
                     )
                     st.plotly_chart(fig_o, use_container_width=True)
     else:
@@ -1274,7 +1284,7 @@ if 'run_now' in globals() and run_now:
     status_area.info("Queued — starting subprocess...")
     with st.spinner("Running (this may take a while)..."):
         try:
-            status_area.info("Running NSGA-II...")
+            status_area.info("Running...")
             proc = subprocess.run(cmd, cwd=str(project_root), capture_output=True, text=True)
             rc = proc.returncode
             stdout = proc.stdout
