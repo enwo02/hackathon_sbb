@@ -964,7 +964,7 @@ for _, r in df_bar.iterrows():
         if edge_id_for_asset is not None
         else _hex_color_from_string(asset_id)
     )
-    start_day = int(r["start_day"])
+    start_day = int(r["start_day"]) 
     dur_days = float(r["duration_days"])
     end_day = float(start_day + dur_days)
     start_date = base_date + timedelta(days=start_day)
@@ -1141,16 +1141,25 @@ try:
     # Mini timelines: visualize before and after as horizontal bars
     fig_before_mut = go.Figure()
     fig_after_mut = go.Figure()
+    # Colors: before=blue, after unchanged=orange, after mutated=red
+    COLOR_BEFORE = "#1f77b4"
+    COLOR_AFTER_UNCHANGED = "#62c43c"
+    COLOR_AFTER_MUTATED = "#d62728"
     for _, r in df_mut.iterrows():
         asset_id = str(r["Asset"])
         dur = float(duration_days_by_asset.get(asset_id, DEFAULT_DURATION_DAYS)) if 'duration_days_by_asset' in locals() else DEFAULT_DURATION_DAYS
-        start_b = int(math.floor(r["Start before (days)"]))
-        start_a = int(math.floor(r["Start after (days)"]))
+        start_b = float(r["Start before (days)"])
+        start_a = float(r["Start after (days)"])
+        mutated = abs(start_a - start_b) > 1e-9
+        start_b_i = int(math.floor(start_b))
+        start_a_i = int(math.floor(start_a))
+
         fig_before_mut.add_trace(
-            go.Bar(y=[asset_id], x=[dur], base=[start_b], orientation="h", marker=dict(color="#1f77b4"), name="before")
+            go.Bar(y=[asset_id], x=[dur], base=[start_b_i], orientation="h", marker=dict(color=COLOR_BEFORE), name="before")
         )
+        after_color = COLOR_AFTER_MUTATED if mutated else COLOR_AFTER_UNCHANGED
         fig_after_mut.add_trace(
-            go.Bar(y=[asset_id], x=[dur], base=[start_a], orientation="h", marker=dict(color="#ff7f0e"), name="after")
+            go.Bar(y=[asset_id], x=[dur], base=[start_a_i], orientation="h", marker=dict(color=after_color), name="after")
         )
 
     fig_before_mut.update_layout(barmode="stack", height=200 + 28 * max(1, len(df_mut)), showlegend=False, margin={"l": 0, "r": 0, "t": 0, "b": 0})
