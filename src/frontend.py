@@ -12,8 +12,88 @@ from pathlib import Path
 import json
 import subprocess
 import sys
-# removed components-based auto-refresh (manual refresh added below)
+import urllib.parse
+import urllib.request
+import hashlib
 import time
+
+# Reduce top whitespace (Streamlit header) so the title starts higher
+st.markdown(
+    """
+    <style>
+      header[data-testid="stHeader"] { display: none; }
+      div[data-testid="stToolbar"] { visibility: hidden; height: 0%; position: fixed; }
+      .block-container { padding-top: 0.5rem; padding-bottom: 1rem; }
+      /* Streamlit adds a top spacer in some versions */
+      div[data-testid="stVerticalBlock"] > div:has(> div.st-emotion-cache-1jicfl2) { margin-top: 0rem; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# --- Optional OSRM routing (for Bus edges) ---
+# Uses the public demo server by default. For production, run your own OSRM instance.
+OSRM_BASE_URL = "https://router.project-osrm.org"
+
+
+def _hex_color_from_string(s: str) -> str:
+    """Deterministic bright-ish color for a given key."""
+    h = hashlib.md5(s.encode("utf-8")).hexdigest()
+    # Keep it a bit brighter by mixing with a baseline.
+    r = (int(h[0:2], 16) // 2) + 80
+    g = (int(h[2:4], 16) // 2) + 80
+    b = (int(h[4:6], 16) // 2) + 80
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+
+@st.cache_data(show_spinner=False, ttl=60 * 60)
+def _osrm_route_lon_lat(
+    lon_a: float,
+    lat_a: float,
+    lon_b: float,
+    lat_b: float,
+    *,
+    profile: str = "driving",
+    overview: str = "full",
+    geometries: str = "geojson",
+    timeout_s: float = 10.0,
+) -> list[tuple[float, float]]:
+    """Fetch a route polyline from OSRM.
+
+    Returns list of (lon, lat) points. Empty list on errors.
+    """
+    try:
+        coords = f"{lon_a:.6f},{lat_a:.6f};{lon_b:.6f},{lat_b:.6f}"
+        params = {
+            "overview": overview,
+            "geometries": geometries,
+        }
+        url = f"{OSRM_BASE_URL}/route/v1/{profile}/{coords}?{urllib.parse.urlencode(params)}"
+        req = urllib.request.Request(url, headers={"User-Agent": "hackathon_sbb_frontend"})
+        with urllib.request.urlopen(req, timeout=float(timeout_s)) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+        routes = payload.get("routes")
+        if not routes:
+            return []
+        geom = routes[0].get("geometry")
+        if not geom:
+            return []
+        # With geometries=geojson, geometry is {"coordinates": [[lon,lat], ...], "type": "LineString"}
+        coords_list = geom.get("coordinates") if isinstance(geom, dict) else None
+        if not isinstance(coords_list, list):
+            return []
+        pts: list[tuple[float, float]] = []
+        for p in coords_list:
+            if isinstance(p, (list, tuple)) and len(p) >= 2:
+                try:
+                    pts.append((float(p[0]), float(p[1])))
+                except Exception:
+                    continue
+        return pts
+    except Exception:
+        return []
+# removed components-based auto-refresh (manual refresh added below)
+
 
 st.set_page_config(page_title="Schedule Visualizer", layout="wide")
 
@@ -40,9 +120,9 @@ fallback_best_result = {"best_schedule": {
 # ---- NSGA-II controls (sidebar) ----
 with st.sidebar:
     st.header("Run NSGA-II")
-    w1 = st.slider("Weight: condition", 0.0, 1.0, 0.3, 0.01)
-    w2 = st.slider("Weight: travel time", 0.0, 1.0, 0.4, 0.01)
-    w3 = st.slider("Weight: cost", 0.0, 1.0, 0.3, 0.01)
+    w1 = st.slider("Weight: Track Condition", 0.0, 1.0, 0.3, 0.01)
+    w2 = st.slider("Weight: Travel Time", 0.0, 1.0, 0.4, 0.01)
+    w3 = st.slider("Weight: Cost", 0.0, 1.0, 0.3, 0.01)
     # Normalize weights so they sum to 1 (avoid passing all zeros)
     _total_w = float(w1 + w2 + w3)
     if _total_w <= 0:
@@ -51,7 +131,7 @@ with st.sidebar:
         weights = (w1 / _total_w, w2 / _total_w, w3 / _total_w)
     st.write(f"Normalized weights: {weights[0]:.2f}, {weights[1]:.2f}, {weights[2]:.2f}")
 
-    horizon = st.slider("Horizon (hours)", 1.0, 200.0, 60.0, 1.0)
+    horizon = st.slider("Horizon (days)", 1.0, 200.0, 60.0, 1.0)
     population = st.slider("Population", 4, 200, 24, 4)
     cx = st.slider("Crossover (cx)", 0.0, 1.0, 0.3, 0.01)
     mut = st.slider("Mutation (mut)", 0.0, 1.0, 0.1, 0.01)
@@ -173,6 +253,50 @@ fallback_edges = [
     ("N4", "N1"),
 ]
 
+def _parse_lon_lat_path(value) -> list[tuple[float, float]]:
+    """Parse a polyline from CSV.
+
+    Supported formats:
+    - JSON array of [lon, lat] pairs: [[8.5, 47.3], [8.6, 47.35]]
+    - JSON array of objects: [{"lon": 8.5, "lat": 47.3}, ...]
+
+    Returns list of (lon, lat). Empty list on missing/invalid.
+    """
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return []
+
+    if isinstance(value, (list, tuple)):
+        raw = value
+    else:
+        s = str(value).strip()
+        if not s:
+            return []
+        try:
+            raw = json.loads(s)
+        except Exception:
+            return []
+
+    pts: list[tuple[float, float]] = []
+    if isinstance(raw, list):
+        for item in raw:
+            if isinstance(item, (list, tuple)) and len(item) >= 2:
+                try:
+                    lon = float(item[0])
+                    lat = float(item[1])
+                    pts.append((lon, lat))
+                except Exception:
+                    continue
+            elif isinstance(item, dict) and "lon" in item and "lat" in item:
+                try:
+                    pts.append((float(item["lon"]), float(item["lat"])))
+                except Exception:
+                    continue
+    return pts
+
+
+def _edge_key(a: str, b: str) -> str:
+    return f"{a}->{b}"
+
 try:
     print(f"[DEBUG frontend] reading edges from {edges_csv_path}", flush=True)
     df_edges = pd.read_csv(edges_csv_path)
@@ -184,20 +308,148 @@ try:
     df_edges = df_edges.dropna(subset=["start_node", "end_node"]).copy()
     df_edges["capacity_at_day"] = pd.to_numeric(df_edges["capacity_at_day"], errors="coerce")
 
-    # Keep capacity with each edge so we can scale line width.
+    # Keep capacity + mode with each edge so we can style and optionally route it.
     edges = []
     for r in df_edges.itertuples(index=False):
         a = str(getattr(r, "start_node"))
         b = str(getattr(r, "end_node"))
         cap = getattr(r, "capacity_at_day", None)
         cap_val = float(cap) if cap is not None and not pd.isna(cap) else None
-        edges.append({"a": a, "b": b, "capacity_at_day": cap_val})
+        mode_val = getattr(r, "mode", None) if "mode" in df_edges.columns else None
+        edge_id_val = getattr(r, "edge_id", None) if "edge_id" in df_edges.columns else None
+        edges.append(
+            {
+                "a": a,
+                "b": b,
+                "edge_id": (str(edge_id_val) if edge_id_val is not None and not pd.isna(edge_id_val) else _edge_key(a, b)),
+                "capacity_at_day": cap_val,
+                "mode": (str(mode_val) if mode_val is not None and not pd.isna(mode_val) else None),
+            }
+        )
     print(f"[DEBUG frontend] loaded {len(edges)} edges", flush=True)
     if len(edges) == 0:
         edges = fallback_edges
 except Exception as e:
     st.warning(f"Could not read edges from {edges_csv_path}: {e}. Falling back to hardcoded edges.")
     edges = fallback_edges
+
+# Load asset->edge mapping so the schedule timeline can share colors with edges.
+assets_csv_path = data_dir / "assets_template.csv"
+asset_edge_by_asset_id: dict[str, str] = {}
+
+# Load assets for plotting on the map (emoji by type)
+_assets_for_map: list[dict] = []
+
+# Asset marker label (single-letter) is always used (emojis/symbols are unreliable in Plotly Mapbox).
+
+def _asset_label(asset_type: str | None) -> str:
+    t = (asset_type or "").strip()
+    return {
+        "Kai": "K",
+        "Weiche": "W",
+        "Brücke": "B",
+        "Tunnel": "T",
+        "Seilen": "S",
+        "K_Straße": "R",  # road
+        "Kabine": "G",   # gondola
+    }.get(t, "?")
+
+def _asset_color(asset_type: str | None) -> str:
+    t = (asset_type or "").strip()
+    return {
+        "Kai": "#1f77b4",      # blue
+        "Weiche": "#ff7f0e",   # orange
+        "Brücke": "#7f7f7f",   # gray
+        "Tunnel": "#2ca02c",   # green
+        "Seilen": "#9467bd",   # purple
+        "K_Straße": "#d62728", # red
+    }.get(t, "#111111")
+
+try:
+    df_assets_for_edges = pd.read_csv(assets_csv_path)
+    if {"asset_id", "edge_id"}.issubset(set(df_assets_for_edges.columns)):
+        df_assets_for_edges = df_assets_for_edges.dropna(subset=["asset_id", "edge_id"]).copy()
+        asset_edge_by_asset_id = {
+            str(r.asset_id): str(r.edge_id) for r in df_assets_for_edges.itertuples(index=False)
+        }
+
+    # Assets for the map (optional columns are tolerated)
+    required_map_cols = {"asset_id", "asset_type", "location_x", "location_y"}
+    if required_map_cols.issubset(set(df_assets_for_edges.columns)):
+        df_map = df_assets_for_edges.dropna(subset=["asset_id", "asset_type", "location_x", "location_y"]).copy()
+        df_map["location_x"] = pd.to_numeric(df_map["location_x"], errors="coerce")  # lat
+        df_map["location_y"] = pd.to_numeric(df_map["location_y"], errors="coerce")  # lon
+        df_map = df_map.dropna(subset=["location_x", "location_y"]).reset_index(drop=True)
+
+        for r in df_map.itertuples(index=False):
+            _assets_for_map.append(
+                {
+                    "asset_id": str(getattr(r, "asset_id")),
+                    "edge_id": str(getattr(r, "edge_id")) if hasattr(r, "edge_id") and getattr(r, "edge_id") is not None else None,
+                    "asset_type": str(getattr(r, "asset_type")),
+                    "lat": float(getattr(r, "location_x")),
+                    "lon": float(getattr(r, "location_y")),
+                    "condition_initial": getattr(r, "condition_initial", None),
+                }
+            )
+except Exception:
+    asset_edge_by_asset_id = {}
+    _assets_for_map = []
+
+# Deterministic color per edge_id for consistent map + schedule colors.
+edge_color_by_edge_id: dict[str, str] = {}
+if len(edges) > 0 and isinstance(edges[0], dict):
+    for e in edges:
+        eid = str(e.get("edge_id") or _edge_key(e.get("a", ""), e.get("b", "")))
+        if eid not in edge_color_by_edge_id:
+            edge_color_by_edge_id[eid] = _hex_color_from_string(eid)
+
+# Optional: load train (Zug) polylines from data/edge_paths_train.csv
+edge_paths_csv_path = data_dir / "edge_paths_train.csv"
+train_paths: dict[str, list[tuple[float, float]]] = {}
+_train_paths_load_error: str | None = None
+try:
+    if edge_paths_csv_path.exists():
+        # NOTE: path_lon_lat contains commas. In CSV this MUST be quoted, e.g.
+        # "[[8.53,47.04],[8.54,47.05]]"
+        # We use the python engine + backslash escape to be more forgiving.
+        try:
+            df_paths = pd.read_csv(edge_paths_csv_path, engine="python", escapechar="\\")
+        except Exception:
+            # Fallback: allow a pipe-separated file if you prefer to avoid quoting JSON.
+            df_paths = pd.read_csv(edge_paths_csv_path, sep="|", engine="python")
+
+        required_path_cols = {"start_node", "end_node", "path_lon_lat"}
+        if not required_path_cols.issubset(set(df_paths.columns)):
+            raise ValueError(
+                f"edge_paths_train.csv must contain columns {sorted(required_path_cols)}; got {sorted(df_paths.columns)}"
+            )
+        df_paths = df_paths.dropna(subset=["start_node", "end_node"]).copy()
+        for r in df_paths.itertuples(index=False):
+            a = str(getattr(r, "start_node"))
+            b = str(getattr(r, "end_node"))
+            path_val = getattr(r, "path_lon_lat", None)
+            pts = _parse_lon_lat_path(path_val)
+            if pts:
+                train_paths[_edge_key(a, b)] = pts
+except Exception as e:
+    _train_paths_load_error = str(e)
+    st.warning(f"Could not read train edge paths from {edge_paths_csv_path}: {e}. Falling back to straight lines.")
+
+with st.sidebar:
+    st.caption(
+        "Train routes (mode=Zug) can optionally be drawn from data/edge_paths_train.csv "
+        "(columns: start_node,end_node,path_lon_lat)."
+    )
+    st.caption(f"Assets loaded for map: {len(_assets_for_map)}")
+    st.caption(
+        "If you use comma-separated CSV, wrap path_lon_lat in quotes, e.g. "
+        "\"[[8.53,47.04],[8.54,47.05]]\". "
+        "Alternatively you can use a pipe-separated file (same name) with rows like: "
+        "start_node|end_node|path_lon_lat"
+    )
+    if _train_paths_load_error:
+        st.warning(f"edge_paths_train.csv parse error: {_train_paths_load_error}")
 
 # Build coordinate maps
 coord = {n["id"]: (n["lon"], n["lat"]) for n in nodes}
@@ -249,17 +501,52 @@ def _edge_width_from_capacity(capacity_at_day: float | None) -> float:
 if len(edges) > 0 and isinstance(edges[0], dict):
     for e in edges:
         a, b = e["a"], e["b"]
-        lon_a, lat_a = coord[a]
-        lon_b, lat_b = coord[b]
+        if a not in coord or b not in coord:
+            continue
+
+        # Use polyline only for trains and only if we have a path.
+        pts: list[tuple[float, float]] = []
+        mode = (e.get("mode") or "").strip()
+        if mode in ("Zug", "Schiff"):
+            pts = train_paths.get(_edge_key(a, b), [])
+        elif mode == "Bus":
+            lon_a, lat_a = coord[a]
+            lon_b, lat_b = coord[b]
+            pts = _osrm_route_lon_lat(lon_a, lat_a, lon_b, lat_b)
+
+        # If a path exists, ensure it connects the endpoints (prepend/append if needed).
+        if pts:
+            lon_a, lat_a = coord[a]
+            lon_b, lat_b = coord[b]
+            if (abs(pts[0][0] - lon_a) > 1e-6) or (abs(pts[0][1] - lat_a) > 1e-6):
+                pts = [(lon_a, lat_a)] + pts
+            if (abs(pts[-1][0] - lon_b) > 1e-6) or (abs(pts[-1][1] - lat_b) > 1e-6):
+                pts = pts + [(lon_b, lat_b)]
+
+        if pts:
+            lon = [p[0] for p in pts]
+            lat = [p[1] for p in pts]
+        else:
+            lon_a, lat_a = coord[a]
+            lon_b, lat_b = coord[b]
+            lon = [lon_a, lon_b]
+            lat = [lat_a, lat_b]
+
         w = _edge_width_from_capacity(e.get("capacity_at_day"))
+        edge_id = str(e.get("edge_id") or _edge_key(a, b))
+        edge_color = edge_color_by_edge_id.get(edge_id) or _hex_color_from_string(edge_id)
         edge_traces.append(
             go.Scattermapbox(
-                lon=[lon_a, lon_b],
-                lat=[lat_a, lat_b],
+                lon=lon,
+                lat=lat,
                 mode="lines",
-                line=dict(width=w, color="blue"),
+                line=dict(width=w, color=edge_color),
                 hovertemplate=(
-                    f"<b>{a} → {b}</b><br>capacity_at_day: {e.get('capacity_at_day')}<extra></extra>"
+                    f"<b>{a}  {b}</b><br>"
+                    f"edge_id: {edge_id}<br>"
+                    f"mode: {mode}<br>"
+                    f"capacity_at_day: {e.get('capacity_at_day')}<br>"
+                    f"path_points: {len(pts) if pts else 0}<extra></extra>"
                 ),
             )
         )
@@ -281,13 +568,54 @@ node_trace = go.Scattermapbox(
     lon=[n["lon"] for n in nodes],
     lat=[n["lat"] for n in nodes],
     mode="markers+text",
-    marker=go.scattermapbox.Marker(size=12, color="red"),
+    marker=go.scattermapbox.Marker(size=12, color="black", symbol="circle"),
     text=[n["id"] for n in nodes],
     textposition="top center",
+    textfont=dict(color="black")
 )
 
+node_trace_inner = go.Scattermapbox(
+    lon=[n["lon"] for n in nodes],
+    lat=[n["lat"] for n in nodes],
+    marker=go.scattermapbox.Marker(size=6, color="white", symbol="circle"),
+)
+
+# Assets layer (emoji labels)
+asset_traces = []
+if _assets_for_map:
+    _customdata = [
+        [a.get("asset_id"), a.get("asset_type"), a.get("edge_id"), a.get("condition_initial")]
+        for a in _assets_for_map
+    ]
+
+    # Single-letter label overlay + colored marker.
+    asset_traces.append(
+        go.Scattermapbox(
+            lon=[a["lon"] for a in _assets_for_map],
+            lat=[a["lat"] for a in _assets_for_map],
+            mode="markers+text",
+            marker=go.scattermapbox.Marker(
+                size=15,
+                #color=[_asset_color(a.get("asset_type")) for a in _assets_for_map],
+                color="white",
+                symbol="circle",
+                opacity=0.7,
+            ),
+            text=[_asset_label(a.get("asset_type")) for a in _assets_for_map],
+            textposition="middle center",
+            textfont=dict(size=10, color="black"),
+            hovertemplate=(
+                "<b>%{customdata[0]}</b><br>"
+                "type: %{customdata[1]}<br>"
+                "edge_id: %{customdata[2]}<br>"
+                "condition_initial: %{customdata[3]}<extra></extra>"
+            ),
+            customdata=_customdata,
+        )
+    )
+
 # Compose and display map. Use an open-access map style that doesn't require a Mapbox token.
-fig_map = go.Figure(data=edge_traces + [node_trace])
+fig_map = go.Figure(data=edge_traces + [node_trace, node_trace_inner] + asset_traces)
 if len(nodes) > 0:
     center_lat = sum(n["lat"] for n in nodes) / len(nodes)
     center_lon = sum(n["lon"] for n in nodes) / len(nodes)
@@ -296,7 +624,8 @@ else:
 
 fig_map.update_layout(
     mapbox=dict(
-        style="open-street-map",
+        # Black/white basemap
+        style="carto-positron",
         center=dict(lat=float(center_lat), lon=float(center_lon)),
         zoom=10,
     ),
@@ -307,6 +636,35 @@ fig_map.update_layout(
 
 with col_left:
     st.plotly_chart(fig_map, width="stretch")
+
+    # Asset label legend (letters on the map)
+    st.markdown("**Asset legend**")
+    _legend_items = [
+        ("K", "Pier"),
+        ("W", "Switch"),
+        ("B", "Bridge"),
+        ("T", "Tunnel"),
+        ("S", "Roap"),
+        ("R", "Road"),
+        ("G", "Gondola"),
+        ("?", "Unknown / other"),
+    ]
+    st.markdown(
+        "<div style='display:flex;gap:10px;flex-wrap:wrap;align-items:center'>"
+        + "".join(
+            f"<div style='display:flex;align-items:center;gap:6px'>"
+            f"<span style='display:inline-flex;justify-content:center;align-items:center;"
+            f"width:22px;height:22px;border-radius:50%;border:1px solid #999;background:#fff;"
+            f"color:#000;"
+            f"font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;"
+            f"font-size:12px;font-weight:700'>{lit}</span>"
+            f"<span style='font-size:12px;'>{name}</span>"
+            f"</div>"
+            for lit, name in _legend_items
+        )
+        + "</div>",
+        unsafe_allow_html=True,
+    )
 
 # Part 2: Calendar / Gantt view for assets
 with col_right:
@@ -320,7 +678,7 @@ start_values = best_result["best_schedule"]
 base_date = date(2026, 1, 1)
 
 # Load per-asset maintenance durations (half-days) from assets_template.csv
-assets_csv_path = data_dir / "assets_template.csv"
+# (assets_csv_path already defined above)
 DEFAULT_DURATION_DAYS = 4.0
 
 duration_days_by_asset: dict[str, float] = {}
@@ -395,6 +753,13 @@ df_bar["duration_days"] = df_bar.get("duration_days", DEFAULT_DURATION_DAYS).ast
 
 fig_timeline = go.Figure()
 for _, r in df_bar.iterrows():
+    asset_id = str(r["Asset"])
+    edge_id_for_asset = asset_edge_by_asset_id.get(asset_id)
+    bar_color = (
+        edge_color_by_edge_id.get(edge_id_for_asset)
+        if edge_id_for_asset is not None
+        else _hex_color_from_string(asset_id)
+    )
     start_day = int(r["start_day"])
     dur_days = float(r["duration_days"])
     end_day = float(start_day + dur_days)
@@ -406,6 +771,7 @@ for _, r in df_bar.iterrows():
             y=[r["Asset"]],
             x=[dur_days],
             base=[start_day],
+            marker=dict(color=bar_color),
             customdata=[
                 [
                     start_day,
@@ -413,13 +779,14 @@ for _, r in df_bar.iterrows():
                     end_day,
                     start_date.isoformat(),
                     end_date.isoformat(),
+                    edge_id_for_asset,
                 ]
             ],
             orientation="h",
             name=r["Asset"],
             hovertemplate=(
                 "<b>%{y}</b><br>"
-                #"Start day: %{customdata[0]}<br>"
+                "Edge: %{customdata[5]}<br>"
                 "Duration: %{customdata[1]:.1f} days<br>"
                 "Start: %{customdata[3]}<br>"
                 "End: %{customdata[4]}"
@@ -458,6 +825,7 @@ with col_right:
 
 # Show a table of schedule values (below the chart)
 with col_right:
+    st.markdown("<div style='height:30px'></div>", unsafe_allow_html=True)
     st.write("Schedule table (start date computed by flooring the provided start float):")
     st.dataframe(
         df_schedule.assign(
