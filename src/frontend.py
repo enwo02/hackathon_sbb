@@ -275,6 +275,35 @@ except Exception as e:
 # Load asset->edge mapping so the schedule timeline can share colors with edges.
 assets_csv_path = data_dir / "assets_template.csv"
 asset_edge_by_asset_id: dict[str, str] = {}
+
+# Load assets for plotting on the map (emoji by type)
+_assets_for_map: list[dict] = []
+
+# Asset marker label (single-letter) is always used (emojis/symbols are unreliable in Plotly Mapbox).
+
+def _asset_label(asset_type: str | None) -> str:
+    t = (asset_type or "").strip()
+    return {
+        "Kai": "K",
+        "Weiche": "W",
+        "Brücke": "B",
+        "Tunnel": "T",
+        "Seilen": "S",
+        "K_Straße": "R",  # road
+        "Kabine": "G",   # gondola
+    }.get(t, "?")
+
+def _asset_color(asset_type: str | None) -> str:
+    t = (asset_type or "").strip()
+    return {
+        "Kai": "#1f77b4",      # blue
+        "Weiche": "#ff7f0e",   # orange
+        "Brücke": "#7f7f7f",   # gray
+        "Tunnel": "#2ca02c",   # green
+        "Seilen": "#9467bd",   # purple
+        "K_Straße": "#d62728", # red
+    }.get(t, "#111111")
+
 try:
     df_assets_for_edges = pd.read_csv(assets_csv_path)
     if {"asset_id", "edge_id"}.issubset(set(df_assets_for_edges.columns)):
@@ -282,8 +311,29 @@ try:
         asset_edge_by_asset_id = {
             str(r.asset_id): str(r.edge_id) for r in df_assets_for_edges.itertuples(index=False)
         }
+
+    # Assets for the map (optional columns are tolerated)
+    required_map_cols = {"asset_id", "asset_type", "location_x", "location_y"}
+    if required_map_cols.issubset(set(df_assets_for_edges.columns)):
+        df_map = df_assets_for_edges.dropna(subset=["asset_id", "asset_type", "location_x", "location_y"]).copy()
+        df_map["location_x"] = pd.to_numeric(df_map["location_x"], errors="coerce")  # lat
+        df_map["location_y"] = pd.to_numeric(df_map["location_y"], errors="coerce")  # lon
+        df_map = df_map.dropna(subset=["location_x", "location_y"]).reset_index(drop=True)
+
+        for r in df_map.itertuples(index=False):
+            _assets_for_map.append(
+                {
+                    "asset_id": str(getattr(r, "asset_id")),
+                    "edge_id": str(getattr(r, "edge_id")) if hasattr(r, "edge_id") and getattr(r, "edge_id") is not None else None,
+                    "asset_type": str(getattr(r, "asset_type")),
+                    "lat": float(getattr(r, "location_x")),
+                    "lon": float(getattr(r, "location_y")),
+                    "condition_initial": getattr(r, "condition_initial", None),
+                }
+            )
 except Exception:
     asset_edge_by_asset_id = {}
+    _assets_for_map = []
 
 # Deterministic color per edge_id for consistent map + schedule colors.
 edge_color_by_edge_id: dict[str, str] = {}
@@ -330,6 +380,7 @@ with st.sidebar:
         "Train routes (mode=Zug) can optionally be drawn from data/edge_paths_train.csv "
         "(columns: start_node,end_node,path_lon_lat)."
     )
+    st.caption(f"Assets loaded for map: {len(_assets_for_map)}")
     st.caption(
         "If you use comma-separated CSV, wrap path_lon_lat in quotes, e.g. "
         "\"[[8.53,47.04],[8.54,47.05]]\". "
@@ -456,13 +507,54 @@ node_trace = go.Scattermapbox(
     lon=[n["lon"] for n in nodes],
     lat=[n["lat"] for n in nodes],
     mode="markers+text",
-    marker=go.scattermapbox.Marker(size=12, color="red"),
+    marker=go.scattermapbox.Marker(size=12, color="black", symbol="circle"),
     text=[n["id"] for n in nodes],
     textposition="top center",
+    textfont=dict(color="black")
 )
 
+node_trace_inner = go.Scattermapbox(
+    lon=[n["lon"] for n in nodes],
+    lat=[n["lat"] for n in nodes],
+    marker=go.scattermapbox.Marker(size=6, color="white", symbol="circle"),
+)
+
+# Assets layer (emoji labels)
+asset_traces = []
+if _assets_for_map:
+    _customdata = [
+        [a.get("asset_id"), a.get("asset_type"), a.get("edge_id"), a.get("condition_initial")]
+        for a in _assets_for_map
+    ]
+
+    # Single-letter label overlay + colored marker.
+    asset_traces.append(
+        go.Scattermapbox(
+            lon=[a["lon"] for a in _assets_for_map],
+            lat=[a["lat"] for a in _assets_for_map],
+            mode="markers+text",
+            marker=go.scattermapbox.Marker(
+                size=15,
+                #color=[_asset_color(a.get("asset_type")) for a in _assets_for_map],
+                color="white",
+                symbol="circle",
+                opacity=0.7,
+            ),
+            text=[_asset_label(a.get("asset_type")) for a in _assets_for_map],
+            textposition="middle center",
+            textfont=dict(size=10, color="black"),
+            hovertemplate=(
+                "<b>%{customdata[0]}</b><br>"
+                "type: %{customdata[1]}<br>"
+                "edge_id: %{customdata[2]}<br>"
+                "condition_initial: %{customdata[3]}<extra></extra>"
+            ),
+            customdata=_customdata,
+        )
+    )
+
 # Compose and display map. Use an open-access map style that doesn't require a Mapbox token.
-fig_map = go.Figure(data=edge_traces + [node_trace])
+fig_map = go.Figure(data=edge_traces + [node_trace, node_trace_inner] + asset_traces)
 if len(nodes) > 0:
     center_lat = sum(n["lat"] for n in nodes) / len(nodes)
     center_lon = sum(n["lon"] for n in nodes) / len(nodes)
