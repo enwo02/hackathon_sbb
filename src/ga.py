@@ -211,15 +211,11 @@ class NSGA2Optimizer:
 
         for _gen in range(1, self.config.generations + 1):
             gen_start_time = time.perf_counter()
-            print("population at start", pop )
-            for mutant in offspring:
-                if random.random() <= self.config.mutation_prob:
-                    self.toolbox.mutate(mutant)
-                    del mutant.fitness.values
+            # print("population at start", pop )
             offspring = tools.selBest(pop, int(len(pop)*self.config.crossover_prob))# .selTournamentDCD(pop, int(len(pop)))
             offspring = list(map(self.toolbox.clone, offspring))
             # print("pop after", pop)
-            print("offspring at start", offspring)
+            # print("offspring at start", offspring)
             # exit()
             # print("pop fit", pop[0].fitness )
             # print("pop crwoding dist", pop[0].fitness.crowding_dist )
@@ -230,14 +226,19 @@ class NSGA2Optimizer:
             # print("offspring after mating", offspring)
             # print(offspring)
 
+            for mutant in offspring:
+                if random.random() <= self.config.mutation_prob:
+                    self.toolbox.mutate(mutant)
+                    del mutant.fitness.values
+
             invalid = [ind for ind in offspring if not ind.fitness.valid]
             for ind in invalid:
                 ind.fitness.values = self.toolbox.evaluate(ind)
             whole = pop + offspring
-            print(len(whole))
-            print()
+            # print(len(whole))
+            # print()
             new_pop = self.toolbox.select(whole, self.config.population_size)
-            print("new_pop", new_pop)
+            # print("new_pop", new_pop)
             pop = new_pop
             # print("population after mating, mutation and selection", pop)
             hall.update(pop)
