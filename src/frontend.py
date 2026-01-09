@@ -9,6 +9,8 @@ import plotly.express as px
 from datetime import date, timedelta
 import math
 from pathlib import Path
+import random
+from deap import tools as deap_tools
 import json
 import subprocess
 import sys
@@ -833,6 +835,72 @@ with col_right:
             End=df_schedule.End.dt.date.astype(str),
         )
     )
+
+
+st.markdown("## Mutation example (educational)")
+st.write("This demonstrates a random individual (start offsets) before and after applying the same mutation operator used in the GA.")
+
+try:
+    # horizon slider is in days in the frontend UI
+    horizon_days = float(horizon) if 'horizon' in locals() else 60.0
+
+    # assets list is derived above from best_result
+    assets_for_demo = list(assets) if isinstance(assets, (list, tuple)) and len(assets) > 0 else [f"A{i+1}" for i in range(5)]
+
+    # Create a random individual (one float per asset)
+    ind_before = [random.uniform(0.0, horizon_days) for _ in assets_for_demo]
+
+    # Copy and mutate using the same operator as in src/ga.py
+    ind_after = list(ind_before)
+    # mutPolynomialBounded mutates in-place and returns a tuple (individual,)
+    try:
+        deap_tools.mutPolynomialBounded(ind_after, low=0.0, up=horizon_days, eta=0.2, indpb=0.2)
+    except Exception:
+        # Fallback: if DEAP not available or mutation fails, perform a small gaussian perturbation
+        print("not available")
+        #ind_after = [max(0.0, min(horizon_days, v + random.gauss(0, horizon_days * 0.05))) for v in ind_after]
+
+    # Build a small comparison table
+    rows_mut = []
+    for a, b, c in zip(assets_for_demo, ind_before, ind_after):
+        rows_mut.append({
+            "Asset": a,
+            "Start before (days)": float(b),
+            "Start after (days)": float(c),
+            "Delta (days)": float(c) - float(b),
+        })
+
+    df_mut = pd.DataFrame(rows_mut)
+    # Mini timelines: visualize before and after as horizontal bars
+    fig_before_mut = go.Figure()
+    fig_after_mut = go.Figure()
+    for _, r in df_mut.iterrows():
+        asset_id = str(r["Asset"])
+        dur = float(duration_days_by_asset.get(asset_id, DEFAULT_DURATION_DAYS)) if 'duration_days_by_asset' in locals() else DEFAULT_DURATION_DAYS
+        start_b = int(math.floor(r["Start before (days)"]))
+        start_a = int(math.floor(r["Start after (days)"]))
+        fig_before_mut.add_trace(
+            go.Bar(y=[asset_id], x=[dur], base=[start_b], orientation="h", marker=dict(color="#1f77b4"), name="before")
+        )
+        fig_after_mut.add_trace(
+            go.Bar(y=[asset_id], x=[dur], base=[start_a], orientation="h", marker=dict(color="#ff7f0e"), name="after")
+        )
+
+    fig_before_mut.update_layout(barmode="stack", height=200 + 28 * max(1, len(df_mut)), showlegend=False, margin={"l": 0, "r": 0, "t": 0, "b": 0})
+    fig_before_mut.update_yaxes(autorange="reversed")
+    fig_after_mut.update_layout(barmode="stack", height=200 + 28 * max(1, len(df_mut)), showlegend=False, margin={"l": 0, "r": 0, "t": 0, "b": 0})
+    fig_after_mut.update_yaxes(autorange="reversed")
+
+    col_b, col_a = st.columns([1, 1])
+    with col_b:
+        st.caption("Before mutation")
+        st.plotly_chart(fig_before_mut, use_container_width=True)
+    with col_a:
+        st.caption("After mutation")
+        st.plotly_chart(fig_after_mut, use_container_width=True)
+
+except Exception as _e:
+    st.warning(f"Could not render mutation demo: {_e}")
 
 # Footer with weighted objectives
 st.subheader("Objectives")
