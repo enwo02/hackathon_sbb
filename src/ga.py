@@ -12,6 +12,8 @@ from simulation import simulate_schedule
 
 import logging 
 import time
+from pathlib import Path
+import json
 
 
 @dataclass
@@ -222,6 +224,15 @@ class NSGA2Optimizer:
 
             pop = self.toolbox.select(pop + offspring, self.config.population_size)
             hall.update(pop)
+            # Write progress file so frontends can monitor progress
+            try:
+                outdir = Path("output")
+                outdir.mkdir(parents=True, exist_ok=True)
+                prog = {"current_generation": int(_gen), "total_generations": int(self.config.generations)}
+                with open(outdir / "progress.json", "w", encoding="utf-8") as pf:
+                    json.dump(prog, pf)
+            except Exception as e:
+                print(f"[DEBUG ga] failed to write progress.json: {e}", flush=True)
 
             # Choose representative “balanced” schedule from current Pareto
             best_gen = self._choose_solution_from_pareto(list(hall))
