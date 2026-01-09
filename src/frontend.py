@@ -33,6 +33,197 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
+# Extra overrides targeting slider track and progress fill specifically
+st.markdown(
+        """
+        <style>
+            /* Slider track (container) */
+            [data-testid="stSlider"] div[style*="height"],
+            [data-baseweb="slider"] div[style*="height"],
+            [data-testid="stSlider"] .st-an,
+            [data-baseweb="slider"] .st-an {
+                background: #28a745 !important;
+                border-radius: 6px !important;
+                height: 6px !important;
+            }
+
+            /* Force the filled portion and overall track to use the primary green */
+            [data-baseweb="slider"] .st-af, [data-baseweb="slider"] .st-ae, [data-testid="stSlider"] .st-af {
+                background: linear-gradient(90deg, none 0%, none 100%) !important;
+            }
+
+            /* Progressbar: show a light-green track and a darker green filled portion.
+               Avoid coloring the outer container solid green so the fill width remains visible. */
+            [data-baseweb="progress-bar"] {
+                background-color: #cfead6 !important; /* track */
+                border-radius: 6px !important;
+                padding: 2px !important;
+            }
+
+            /* Target the inner div that typically receives an inline width (the filled portion). */
+            [data-baseweb="progress-bar"] > div > div > div,
+            [data-baseweb="progress-bar"] div[style*="width"],
+            div[role="progressbar"] > div > div > div,
+            div[role="progressbar"] div[style*="width"] {
+                background-color: #28a745 !important; /* filled */
+                background-image: none !important;
+                box-shadow: none !important;
+                border-radius: 6px !important;
+            }
+
+            /* Additional targets: Streamlit's div-based sliders often nest the fill in child divs.
+               Remove gradients and force a solid green fill on any matching elements. */
+            div[role="slider"] {
+                color: #28a745 !important;
+                background-image: none !important;
+                background-color: #28a745 !important;
+                border-radius: 0px !important;
+                height: 12px !important;
+            }
+            /* Direct child elements that render the filled portion */
+            div[role="slider"] > div,
+            div[role="slider"] > div > div,
+            div[role="slider"] [style*="linear-gradient"] {
+                background-image: none !important;
+                background: none !important;
+                background-color: none !important;
+                box-shadow: none !important;
+                border-radius: 12px !important;
+                height: 12px !important;
+            }
+
+            /* Range input pseudo-elements: WebKit + Firefox */
+            input[type="range"]::-webkit-slider-runnable-track { background: #28a745 !important; }
+            input[type="range"]::-webkit-slider-thumb { background: #28a745 !important; }
+            input[type="range"]::-moz-range-track { background: #28a745 !important; }
+            input[type="range"]::-moz-range-progress { background: #28a745 !important; }
+
+            /* Slider thumb numeric label (the little value bubble) */
+            div[data-testid="stSliderThumbValue"],
+            [data-testid="stSlider"] [data-testid="stSliderThumbValue"],
+            .stSlider [data-testid="stSliderThumbValue"] {
+                color: #90EE90 !important; /* light green */
+                background-color: transparent !important;
+                font-weight: 700 !important;
+            }
+
+            /* Fallback for generic progress elements */
+            progress::-webkit-progress-value { background-color: #28a745 !important; }
+            progress::-moz-progress-bar { background-color: #28a745 !important; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+)
+
+# Style the "Run Genetic Algorithm" button green using its aria-label
+st.markdown(
+        """
+        <style>
+            button[aria-label="Run Genetic Algorithm"] {
+                background-color: #28a745 !important;
+                color: #ffffff !important;
+                border: none !important;
+            }
+            button[aria-label="Run Genetic Algorithm"]:hover {
+                background-color: #218838 !important;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+)
+
+# Additional (broader) styling: target buttons in the sidebar to ensure the Run button becomes green
+st.markdown(
+        """
+        <style>
+            [data-testid="stSidebar"] button {
+                background-color: #28a745 !important;
+                color: #ffffff !important;
+                border: none !important;
+            }
+            [data-testid="stSidebar"] button:hover {
+                background-color: #218838 !important;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+)
+
+# Make sliders and progress bars green (multiple fallbacks for different Streamlit/ browser versions)
+st.markdown(
+        """
+        <style>
+            :root {
+                --primary-color: #28a745;
+                --primary: #28a745;
+            }
+
+            /* modern browsers: color range inputs */
+            input[type="range"] {
+                accent-color: #28a745;
+            }
+
+            /* WebKit slider thumb track color fallback */
+            input[type="range"]::-webkit-slider-runnable-track { background: #28a745 !important; }
+            input[type="range"]::-webkit-slider-thumb { background: #28a745 !important; }
+
+            /* Firefox thumb color */
+            input[type="range"]::-moz-range-thumb { background: #28a745 !important; }
+
+            /* Streamlit progress bar (role-based selector) */
+            [role="progressbar"] > div { background-color: #28a745 !important; }
+            /* Generic progress element */
+            progress::-webkit-progress-value { background-color: #28a745 !important; }
+            progress::-moz-progress-bar { background-color: #28a745 !important; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+)
+
+# Stronger, broader overrides for Streamlit widgets (fallbacks and multiple selectors)
+st.markdown(
+        """
+        <style>
+            /* Try forcing Streamlit's primary color variables */
+            :root, .stApp, body {
+                --primaryColor: #28a745 !important;
+                --accent-color: #28a745 !important;
+                --secondary: #e9f7ec !important;
+            }
+
+            /* Buttons in sidebar and main area */
+            .stButton>button, .stButton>div>button, [data-testid="stSidebar"] button {
+                background-color: #28a745 !important;
+                color: #fff !important;
+                border-color: #28a745 !important;
+            }
+
+            /* Range inputs and slider thumbs */
+            input[type="range"] {
+                accent-color: #28a745 !important;
+                background: linear-gradient(90deg, #28a745 0%, #28a745 100%) !important;
+            }
+            input[type="range"]::-webkit-slider-thumb { background: #28a745 !important; }
+            input[type="range"]::-moz-range-thumb { background: #28a745 !important; }
+            /* Streamlit's div-based slider handles */
+            div[role="slider"] {
+                background-color: #28a745 !important;
+                box-shadow: none !important;
+            }
+
+            /* Progress bars */
+            .stProgress .css-6ntbpo, .stProgress > div > div {
+                background-color: #28a745 !important;
+            }
+            .stProgress progress::-webkit-progress-value { background-color: #28a745 !important; }
+
+            /* Tweak slider fill (some Streamlit versions use a pseudo-element) */
+            .stSlider .css-1q8dd3e { background: #28a745 !important; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+)
+
 # --- Optional OSRM routing (for Bus edges) ---
 # Uses the public demo server by default. For production, run your own OSRM instance.
 OSRM_BASE_URL = "https://router.project-osrm.org"
@@ -121,27 +312,27 @@ fallback_best_result = {"best_schedule": {
 
 # ---- NSGA-II controls (sidebar) ----
 with st.sidebar:
-    st.header("Run NSGA-II")
-    w1 = st.slider("Weight: Track Condition", 0.0, 1.0, 0.3, 0.01)
-    w2 = st.slider("Weight: Travel Time", 0.0, 1.0, 0.4, 0.01)
-    w3 = st.slider("Weight: Cost", 0.0, 1.0, 0.3, 0.01)
+    st.header("Parameters")
+    w1 = st.slider("Objective Weight: Track Condition", 0.0, 1.0, 0.3, 0.01)
+    w2 = st.slider("Objective Weight: Travel Time", 0.0, 1.0, 0.4, 0.01)
+    w3 = st.slider("Objective Weight: Cost", 0.0, 1.0, 0.3, 0.01)
     # Normalize weights so they sum to 1 (avoid passing all zeros)
     _total_w = float(w1 + w2 + w3)
     if _total_w <= 0:
         weights = (0.33, 0.34, 0.33)
     else:
         weights = (w1 / _total_w, w2 / _total_w, w3 / _total_w)
-    st.write(f"Normalized weights: {weights[0]:.2f}, {weights[1]:.2f}, {weights[2]:.2f}")
+    # st.write(f"Normalized weights: {weights[0]:.2f}, {weights[1]:.2f}, {weights[2]:.2f}")
 
-    horizon = st.slider("Horizon (days)", 1.0, 200.0, 60.0, 1.0)
+    horizon = st.slider("Observation period (Days)", 1.0, 200.0, 60.0, 1.0)
     population = st.slider("Population", 4, 200, 24, 4)
-    cx = st.slider("Crossover (cx)", 0.0, 1.0, 0.3, 0.01)
-    mut = st.slider("Mutation (mut)", 0.0, 1.0, 0.1, 0.01)
-    run_now = st.button("Run NSGA-II")
-    status_area = st.empty()
-
+    cx = st.slider("Crossover", 0.0, 1.0, 0.6, 0.01)
+    mut = st.slider("Mutation", 0.0, 1.0, 0.3, 0.01)
     # Optionally show generations/seed inputs if needed
     generations = st.number_input("Generations", min_value=1, max_value=10000, value=10, step=1)
+    
+    run_now = st.button("Run Genetic Algorithm", )
+    status_area = st.empty()
     
 
 try:
@@ -159,8 +350,9 @@ else:
         import datetime
 
         lm = datetime.datetime.fromtimestamp(mtime).isoformat()
-        st.sidebar.write(f"Loaded summary.json (last modified: {lm})")
+        st.sidebar.write(f"Loaded summary.json ({lm})")
     except Exception:
+        pass
         st.sidebar.write("Loaded summary.json")
 
 # Remove internal/unused keys from the loaded result so they are not shown in the frontend
@@ -448,20 +640,20 @@ except Exception as e:
     _train_paths_load_error = str(e)
     st.warning(f"Could not read train edge paths from {edge_paths_csv_path}: {e}. Falling back to straight lines.")
 
-with st.sidebar:
-    st.caption(
-        "Train routes (mode=Zug) can optionally be drawn from data/edge_paths_train.csv "
-        "(columns: start_node,end_node,path_lon_lat)."
-    )
-    st.caption(f"Assets loaded for map: {len(_assets_for_map)}")
-    st.caption(
-        "If you use comma-separated CSV, wrap path_lon_lat in quotes, e.g. "
-        "\"[[8.53,47.04],[8.54,47.05]]\". "
-        "Alternatively you can use a pipe-separated file (same name) with rows like: "
-        "start_node|end_node|path_lon_lat"
-    )
-    if _train_paths_load_error:
-        st.warning(f"edge_paths_train.csv parse error: {_train_paths_load_error}")
+# with st.sidebar:
+#     st.caption(
+#         "Train routes (mode=Zug) can optionally be drawn from data/edge_paths_train.csv "
+#         "(columns: start_node,end_node,path_lon_lat)."
+#     )
+#     st.caption(f"Assets loaded for map: {len(_assets_for_map)}")
+#     st.caption(
+#         "If you use comma-separated CSV, wrap path_lon_lat in quotes, e.g. "
+#         "\"[[8.53,47.04],[8.54,47.05]]\". "
+#         "Alternatively you can use a pipe-separated file (same name) with rows like: "
+#         "start_node|end_node|path_lon_lat"
+#     )
+#     if _train_paths_load_error:
+#         st.warning(f"edge_paths_train.csv parse error: {_train_paths_load_error}")
 
 # Build coordinate maps
 coord = {n["id"]: (n["lon"], n["lat"]) for n in nodes}
@@ -892,7 +1084,7 @@ with col_right:
 # Show a table of schedule values (below the chart)
 with col_left:
     st.markdown("<div style='height:30px'></div>", unsafe_allow_html=True)
-    st.write("Schedule table (start date computed by flooring the provided start float):")
+    st.write("Schedule table")
     df_display = df_schedule.drop(columns=["raw_start"], errors="ignore").copy()
     df_display = df_display.assign(
         Start=df_display.Start.dt.date.astype(str),
@@ -1080,7 +1272,7 @@ if 'run_now' in globals() and run_now:
 
     # Update status area and run subprocess
     status_area.info("Queued — starting subprocess...")
-    with st.spinner("Running NSGA-II (this may take a while)..."):
+    with st.spinner("Running (this may take a while)..."):
         try:
             status_area.info("Running NSGA-II...")
             proc = subprocess.run(cmd, cwd=str(project_root), capture_output=True, text=True)
