@@ -837,7 +837,7 @@ with col_right:
     )
 
 
-st.markdown("## Mutation example (educational)")
+st.markdown("## Mutation example")
 st.write("This demonstrates a random individual (start offsets) before and after applying the same mutation operator used in the GA.")
 
 try:
@@ -901,6 +901,77 @@ try:
 
 except Exception as _e:
     st.warning(f"Could not render mutation demo: {_e}")
+
+# --- Educational: show mating (crossover) example ---
+st.markdown("## Mating example")
+st.write("This shows two parent schedules and a child produced by the GA mating operator.")
+
+try:
+    assets_for_demo = list(assets) if isinstance(assets, (list, tuple)) and len(assets) > 0 else [f"A{i+1}" for i in range(5)]
+    horizon_days = float(horizon) if 'horizon' in locals() else 60.0
+
+    parent1 = [random.uniform(0.0, horizon_days) for _ in assets_for_demo]
+    parent2 = [random.uniform(0.0, horizon_days) for _ in assets_for_demo]
+
+    child1 = list(parent1)
+    child2 = list(parent2)
+    try:
+        deap_tools.cxTwoPoint(child1, child2)
+        child = child1
+    except Exception:
+        # Fallback: simple one-point crossover
+        mid = len(parent1) // 2
+        child = parent1[:mid] + parent2[mid:]
+
+    rows_mate = []
+    for a, p1, p2, ch in zip(assets_for_demo, parent1, parent2, child):
+        rows_mate.append({
+            "Asset": a,
+            "Parent 1 (days)": float(p1),
+            "Parent 2 (days)": float(p2),
+            "Child (days)": float(ch),
+        })
+
+    df_mate = pd.DataFrame(rows_mate)
+    # st.write("Parents and child start offsets:")
+    # st.dataframe(df_mate)
+
+    # Timelines: use real durations per asset
+    fig_p1 = go.Figure()
+    fig_p2 = go.Figure()
+    fig_child = go.Figure()
+    for _, r in df_mate.iterrows():
+        asset_id = str(r["Asset"])
+        dur = float(duration_days_by_asset.get(asset_id, DEFAULT_DURATION_DAYS)) if 'duration_days_by_asset' in locals() else DEFAULT_DURATION_DAYS
+        s1 = int(math.floor(r["Parent 1 (days)"]))
+        s2 = int(math.floor(r["Parent 2 (days)"]))
+        sc = int(math.floor(r["Child (days)"]))
+
+        fig_p1.add_trace(go.Bar(y=[asset_id], x=[dur], base=[s1], orientation="h", marker=dict(color="#2ca02c")))
+        fig_p2.add_trace(go.Bar(y=[asset_id], x=[dur], base=[s2], orientation="h", marker=dict(color="#9467bd")))
+        fig_child.add_trace(go.Bar(y=[asset_id], x=[dur], base=[sc], orientation="h", marker=dict(color="#d62728")))
+
+    for fig in (fig_p1, fig_p2, fig_child):
+        fig.update_layout(barmode="stack", height=200 + 28 * max(1, len(df_mate)), showlegend=False, margin={"l": 0, "r": 0, "t": 0, "b": 0})
+        fig.update_yaxes(autorange="reversed")
+
+    c1, o1, c2, o2, c3 = st.columns([1, 0.1, 1, 0.1, 1])
+    with c1:
+        st.caption("Parent 1")
+        st.plotly_chart(fig_p1, use_container_width=True)
+    with o1:
+        st.title("+", text_alignment="center")
+    with c2:
+        st.caption("Parent 2")
+        st.plotly_chart(fig_p2, use_container_width=True)
+    with o2:
+        st.title("→", text_alignment="center")
+    with c3:
+        st.caption("Child (after cxTwoPoint)")
+        st.plotly_chart(fig_child, use_container_width=True)
+
+except Exception as e:
+    st.warning(f"Could not render mating demo: {e}")
 
 # Footer with weighted objectives
 st.subheader("Objectives")
