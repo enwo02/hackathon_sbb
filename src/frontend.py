@@ -16,6 +16,20 @@ import urllib.parse
 import urllib.request
 import hashlib
 
+# Reduce top whitespace (Streamlit header) so the title starts higher
+st.markdown(
+    """
+    <style>
+      header[data-testid="stHeader"] { display: none; }
+      div[data-testid="stToolbar"] { visibility: hidden; height: 0%; position: fixed; }
+      .block-container { padding-top: 0.5rem; padding-bottom: 1rem; }
+      /* Streamlit adds a top spacer in some versions */
+      div[data-testid="stVerticalBlock"] > div:has(> div.st-emotion-cache-1jicfl2) { margin-top: 0rem; }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 # --- Optional OSRM routing (for Bus edges) ---
 # Uses the public demo server by default. For production, run your own OSRM instance.
 OSRM_BASE_URL = "https://router.project-osrm.org"
@@ -103,9 +117,9 @@ fallback_best_result = {"best_schedule": {
 # ---- NSGA-II controls (sidebar) ----
 with st.sidebar:
     st.header("Run NSGA-II")
-    w1 = st.slider("Weight: condition", 0.0, 1.0, 0.3, 0.01)
-    w2 = st.slider("Weight: travel time", 0.0, 1.0, 0.4, 0.01)
-    w3 = st.slider("Weight: cost", 0.0, 1.0, 0.3, 0.01)
+    w1 = st.slider("Weight: Track Condition", 0.0, 1.0, 0.3, 0.01)
+    w2 = st.slider("Weight: Travel Time", 0.0, 1.0, 0.4, 0.01)
+    w3 = st.slider("Weight: Cost", 0.0, 1.0, 0.3, 0.01)
     # Normalize weights so they sum to 1 (avoid passing all zeros)
     _total_w = float(w1 + w2 + w3)
     if _total_w <= 0:
@@ -114,7 +128,7 @@ with st.sidebar:
         weights = (w1 / _total_w, w2 / _total_w, w3 / _total_w)
     st.write(f"Normalized weights: {weights[0]:.2f}, {weights[1]:.2f}, {weights[2]:.2f}")
 
-    horizon = st.slider("Horizon (hours)", 1.0, 1000.0, 168.0, 1.0)
+    horizon = st.slider("Horizon (days)", 1.0, 1000.0, 168.0, 1.0)
     population = st.slider("Population", 4, 1000, 40, 1)
     cx = st.slider("Crossover (cx)", 0.0, 1.0, 0.3, 0.01)
     mut = st.slider("Mutation (mut)", 0.0, 1.0, 0.1, 0.01)
@@ -576,6 +590,35 @@ fig_map.update_layout(
 with col_left:
     st.plotly_chart(fig_map, width="stretch")
 
+    # Asset label legend (letters on the map)
+    st.markdown("**Asset legend**")
+    _legend_items = [
+        ("K", "Pier"),
+        ("W", "Switch"),
+        ("B", "Bridge"),
+        ("T", "Tunnel"),
+        ("S", "Roap"),
+        ("R", "Road"),
+        ("G", "Gondola"),
+        ("?", "Unknown / other"),
+    ]
+    st.markdown(
+        "<div style='display:flex;gap:10px;flex-wrap:wrap;align-items:center'>"
+        + "".join(
+            f"<div style='display:flex;align-items:center;gap:6px'>"
+            f"<span style='display:inline-flex;justify-content:center;align-items:center;"
+            f"width:22px;height:22px;border-radius:50%;border:1px solid #999;background:#fff;"
+            f"color:#000;"
+            f"font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Arial;"
+            f"font-size:12px;font-weight:700'>{lit}</span>"
+            f"<span style='font-size:12px;'>{name}</span>"
+            f"</div>"
+            for lit, name in _legend_items
+        )
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+
 # Part 2: Calendar / Gantt view for assets
 with col_right:
     st.subheader("Construction schedule timeline")
@@ -735,6 +778,7 @@ with col_right:
 
 # Show a table of schedule values (below the chart)
 with col_right:
+    st.markdown("<div style='height:30px'></div>", unsafe_allow_html=True)
     st.write("Schedule table (start date computed by flooring the provided start float):")
     st.dataframe(
         df_schedule.assign(
