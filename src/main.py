@@ -15,7 +15,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--edges", default="data/edges_template.csv", help="Path to edges csv")
     parser.add_argument("--assets", default="data/assets_template.csv", help="Path to assets csv")
     parser.add_argument("--flowsday", default="data/passenger_flows_day.csv", help="Path to passenger flows at day csv")
-    parser.add_argument("--flowsnight", default="data/passenger_flows_day.csv", help="Path to passenger flows at night csv")
     parser.add_argument(
         "--weights",
         type=float,
@@ -64,8 +63,7 @@ def main() -> None:
     nodes = load_nodes(args.nodes)
     edges = load_edges(args.edges)
     assets = load_assets(args.assets)
-    flows_day = load_passenger_flows(args.flowsday)
-    flows_night = load_passenger_flows(args.flowsnight)
+    flows = load_passenger_flows(args.flowsday)
 
     config = GAConfig(
         population_size=args.population,
@@ -99,7 +97,7 @@ def main() -> None:
         with open(summary_path, "w", encoding="utf-8") as f:
             json.dump(summary, f, indent=2)
 
-    optimizer = NSGA2Optimizer(nodes, edges, assets, flows_day, flows_night, config)
+    optimizer = NSGA2Optimizer(nodes, edges, assets, flows, config)
     # Initialize progress file so frontends know a run has started (generation 0)
     try:
         progress_path = Path(args.output).parent / "progress.json"
