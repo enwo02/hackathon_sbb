@@ -82,15 +82,24 @@ class NSGA2Optimizer:
         # Better operators for bounded continuous genes:
         # - SBX crossover
         # - Polynomial bounded mutation
-        self.toolbox.register("mate", tools.cxSimulatedBinaryBounded, low=0.0, up=self.config.horizon_hours, eta=15.0)
+        self.toolbox.register("mate", tools.cxTwoPoint)# , alpha=0.5) # .cxSimulatedBinaryBounded, low=0.0, up=self.config.horizon_hours, eta=0.5)
+        # a = [0.1, 0.2, 0.3, 0.4]
+        # print("a", a)
+        # b = [0.5, 0.6, 0.7, 0.8]
+        # print("b", b)
+        # c = tools.cxTwoPoint(a, b)
+        # print("c", c)
+        # exit(0)
         self.toolbox.register(
             "mutate",
             tools.mutPolynomialBounded,
             low=0.0,
             up=self.config.horizon_hours,
-            eta=20.0,
+            eta=0.2,
             indpb=0.3,
         )
+        # print(tools.mutPolynomialBounded([0,5,15, 20], eta=0.2, indpb=0.3, low=0.0, up=self.config.horizon_hours))
+        # exit()
         self.toolbox.register("select", tools.selNSGA2)
         self.toolbox.register("evaluate", self._evaluate)
 
@@ -183,12 +192,9 @@ class NSGA2Optimizer:
         self._progress_cb = progress_cb
 
         pop = self.toolbox.population(n=self.config.population_size)
-        print(pop)
-        exit(0)
 
         # Evaluate initial population
-        invalid = [ind for ind in pop if not ind.fitness.valid]
-        for ind in invalid:
+        for ind in pop:
             ind.fitness.values = self.toolbox.evaluate(ind)
 
         # NSGA-II requires initial sorting
@@ -205,24 +211,35 @@ class NSGA2Optimizer:
 
         for _gen in range(1, self.config.generations + 1):
             gen_start_time = time.perf_counter()
-            offspring = tools.selTournamentDCD(pop, len(pop))
-            offspring = [self.toolbox.clone(ind) for ind in offspring]
-
-            for c1, c2 in zip(offspring[::2], offspring[1::2]):
-                if random.random() <= self.config.crossover_prob:
-                    self.toolbox.mate(c1, c2)
-                    del c1.fitness.values, c2.fitness.values
-
+            print("population at start", pop )
             for mutant in offspring:
                 if random.random() <= self.config.mutation_prob:
                     self.toolbox.mutate(mutant)
                     del mutant.fitness.values
+            offspring = tools.selBest(pop, int(len(pop)*self.config.crossover_prob))# .selTournamentDCD(pop, int(len(pop)))
+            offspring = list(map(self.toolbox.clone, offspring))
+            # print("pop after", pop)
+            print("offspring at start", offspring)
+            # exit()
+            # print("pop fit", pop[0].fitness )
+            # print("pop crwoding dist", pop[0].fitness.crowding_dist )
+
+            for c1, c2 in zip(offspring[::2], offspring[1::2]):
+                self.toolbox.mate(c1, c2)
+                del c1.fitness.values, c2.fitness.values
+            # print("offspring after mating", offspring)
+            # print(offspring)
 
             invalid = [ind for ind in offspring if not ind.fitness.valid]
             for ind in invalid:
                 ind.fitness.values = self.toolbox.evaluate(ind)
-
-            pop = self.toolbox.select(pop + offspring, self.config.population_size)
+            whole = pop + offspring
+            print(len(whole))
+            print()
+            new_pop = self.toolbox.select(whole, self.config.population_size)
+            print("new_pop", new_pop)
+            pop = new_pop
+            # print("population after mating, mutation and selection", pop)
             hall.update(pop)
             # Write progress file so frontends can monitor progress
             try:
