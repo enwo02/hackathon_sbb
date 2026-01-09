@@ -163,6 +163,16 @@ else:
     except Exception:
         st.sidebar.write("Loaded summary.json")
 
+# Remove internal/unused keys from the loaded result so they are not shown in the frontend
+if isinstance(best_result, dict):
+    # top-level key
+    best_result.pop("served_adjusted", None)
+    # nested in objectives or weighted_objectives if present
+    if "objectives" in best_result and isinstance(best_result["objectives"], dict):
+        best_result["objectives"].pop("served_adjusted", None)
+    if "weighted_objectives" in best_result and isinstance(best_result["weighted_objectives"], dict):
+        best_result["weighted_objectives"].pop("served_adjusted", None)
+
 # Show generation progress if available from output/progress.json
 progress_path = project_root / "output" / "progress.json"
 # Initialize session state for progress tracking so we can persist a last-known value
@@ -825,16 +835,71 @@ fig_timeline.update_xaxes(title_text="Date", tickmode="array", tickvals=tickvals
 with col_right:
     st.plotly_chart(fig_timeline, width="stretch")
 
-# Show a table of schedule values (below the chart)
+# Objectives: show each objective as its own bar chart beneath the timeline
 with col_right:
+    st.subheader("Objectives")
+    obj = best_result.get("objectives", {})
+    if isinstance(obj, dict) and obj:
+        # Hard-coded y-axis ranges for known objectives
+        y_ranges = {
+            "condition_penalty": (0.0, 1.0),
+            "avg_condition": (0.0, 1.0),
+            "travel_penalty": (0.0, 1.0),
+            "avg_travel_time": (0.0, 0.35),
+            "total_cost": (0.0, 38000000.0),
+        }
+
+        # Exclude some objectives from charting (e.g., cost_penalty per request)
+        exclude_keys = {"cost_penalty"}
+        plot_keys = [k for k in obj.keys() if k not in exclude_keys]
+
+        if len(plot_keys) == 0:
+            st.info("No objectives to display (all excluded).")
+        else:
+            cols = st.columns(len(plot_keys))
+            for col, k in zip(cols, plot_keys):
+                with col:
+                    try:
+                        val = float(obj.get(k, float('nan')))
+                    except Exception:
+                        val = float('nan')
+
+                    ymin, ymax = y_ranges.get(k, (0.0, max(1.0, abs(val) * 2.0)))
+
+                    # Show value as text on the bar; format to two decimals when numeric
+                    text_label = "" if (isinstance(val, float) and (math.isnan(val))) else f"{val:.2f}"
+                    fig_o = go.Figure(
+                        go.Bar(
+                            x=[k],
+                            y=[val],
+                            marker_color=[_hex_color_from_string(str(k))],
+                            text=[text_label],
+                            textposition="auto",
+                            textfont=dict(size=16),
+                            texttemplate="<b>%{text}</b>",
+                        )
+                    )
+                    fig_o.update_layout(
+                        height=220,
+                        margin={"l": 20, "r": 20, "t": 30, "b": 20},
+                        yaxis=dict(range=[ymin, ymax], title_text="Value"),
+                        title_text=k,
+                    )
+                    st.plotly_chart(fig_o, use_container_width=True)
+    else:
+        st.info("No objectives found in result to display as charts.")
+
+# Show a table of schedule values (below the chart)
+with col_left:
     st.markdown("<div style='height:30px'></div>", unsafe_allow_html=True)
     st.write("Schedule table (start date computed by flooring the provided start float):")
-    st.dataframe(
-        df_schedule.assign(
-            Start=df_schedule.Start.dt.date.astype(str),
-            End=df_schedule.End.dt.date.astype(str),
-        )
+    df_display = df_schedule.drop(columns=["raw_start"], errors="ignore").copy()
+    df_display = df_display.assign(
+        Start=df_display.Start.dt.date.astype(str),
+        End=df_display.End.dt.date.astype(str),
     )
+    # Limit the table height to avoid excessive page length
+    st.dataframe(df_display, height=250)
 
 
 st.markdown("## Mutation example")
@@ -973,31 +1038,23 @@ try:
 except Exception as e:
     st.warning(f"Could not render mating demo: {e}")
 
-# Footer with weighted objectives
-st.subheader("Objectives")
-wo = best_result.get("objectives", {})
-if isinstance(wo, dict) and wo:
-    for k, v in wo.items():
-        st.write(f"{k}: {v}")
-else:
-    st.write("No objectives found in result.")
-
-st.subheader("Weighted objectives (mocked)")
-# Some test fixtures of `best_result` may use the key `objectives` instead of
-# `weighted_objectives`. Fall back safely and show sensible defaults.
-if "weighted_objectives" in best_result and isinstance(best_result["weighted_objectives"], dict):
-    wo = best_result["weighted_objectives"]
-else:
-    obj = best_result.get("objectives", {})
-    wo = {
-        "condition_penalty": obj.get("avg_condition", "N/A"),
-        "travel_penalty": obj.get("avg_travel_time", "N/A"),
-        "cost_penalty": obj.get("total_cost", "N/A"),
-    }
-
-st.write(f"Condition penalty: {wo.get('condition_penalty')}")
-st.write(f"Travel penalty: {wo.get('travel_penalty')}")
-st.write(f"Cost penalty: {wo.get('cost_penalty')}")
+# Weighted objectives (mocked)
+# st.subheader("Weighted objectives (mocked)")
+# # Some test fixtures of `best_result` may use the key `objectives` instead of
+# # `weighted_objectives`. Fall back safely and show sensible defaults.
+# if "weighted_objectives" in best_result and isinstance(best_result["weighted_objectives"], dict):
+#     wo = best_result["weighted_objectives"]
+# else:
+#     obj = best_result.get("objectives", {})
+#     wo = {
+#         "condition_penalty": obj.get("avg_condition", "N/A"),
+#         "travel_penalty": obj.get("avg_travel_time", "N/A"),
+#         "cost_penalty": obj.get("total_cost", "N/A"),
+#     }
+# 
+# st.write(f"Condition penalty: {wo.get('condition_penalty')}")
+# st.write(f"Travel penalty: {wo.get('travel_penalty')}")
+# st.write(f"Cost penalty: {wo.get('cost_penalty')}")
 
 # Raw result at the bottom
 st.divider()
